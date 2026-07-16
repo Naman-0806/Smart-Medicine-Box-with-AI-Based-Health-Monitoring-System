@@ -5,7 +5,7 @@ import altair as alt
 
 _CARD_STYLE = """
 <style>
-.card { background-color: #0e1117; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.5); color: #e6eef8; }
+.card { background-color: #000000; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.5); color: #000000; }
 .card .title { font-size:14px; color:#9fb3d6; }
 .card .value { font-size:22px; font-weight:600; }
 .rounded-table td, .rounded-table th { padding:8px; }
