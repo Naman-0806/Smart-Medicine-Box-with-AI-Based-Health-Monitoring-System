@@ -1,33 +1,10 @@
 import streamlit as st
 from components.sidebar import render_sidebar
+from src.ui import apply_theme_styles
 
 
 def _apply_styles():
-    st.markdown(
-        """
-        <style>
-        .section-card {
-            background-color: #0e1117;
-            padding: 16px;
-            border-radius: 12px;
-            border: 1px solid #253044;
-            margin-bottom: 16px;
-        }
-        .section-title {
-            color: #e6eef8;
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-        .helper-text {
-            color: #9fb3d6;
-            font-size: 12px;
-            margin-top: 6px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    apply_theme_styles()
 
 
 def _clear_form():

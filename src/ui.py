@@ -1,21 +1,176 @@
 import streamlit as st
 import pandas as pd
 import altair as alt
+from streamlit.components.v1 import html
 
 
-_CARD_STYLE = """
+THEME_STORAGE_KEY = "smart_medicine_box_theme"
+
+
+def get_theme():
+    theme = st.session_state.get("theme", "Dark")
+    return "Dark" if str(theme).strip().lower() == "dark" else "Light"
+
+
+def set_theme(theme):
+    normalized = "Dark" if str(theme).strip().lower() == "dark" else "Light"
+    st.session_state["theme"] = normalized
+    return normalized
+
+
+def _inject_theme_script():
+    current_theme = get_theme().lower()
+    script = f"""
+    <script>
+      const storageKey = "{THEME_STORAGE_KEY}";
+      const savedTheme = window.parent.localStorage.getItem(storageKey);
+      const theme = (savedTheme || "{get_theme()}").toLowerCase();
+      const normalizedTheme = theme === "dark" ? "dark" : "light";
+      const root = window.parent.document.documentElement;
+      const body = window.parent.document.body;
+      root.setAttribute("data-theme", normalizedTheme);
+      body.setAttribute("data-theme", normalizedTheme);
+      root.style.colorScheme = normalizedTheme;
+      window.parent.localStorage.setItem(storageKey, normalizedTheme === "dark" ? "Dark" : "Light");
+    </script>
+    """
+    html(script, height=0)
+
+
+_THEME_STYLE = """
 <style>
-.card { background-color: #000000; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.5); color: #000000; }
-.card .title { font-size:14px; color:#9fb3d6; }
-.card .value { font-size:22px; font-weight:600; }
-.rounded-table td, .rounded-table th { padding:8px; }
-.small { font-size:12px; color:#9fb3d6 }
+:root {
+    color-scheme: light;
+    --bg: #f5f7fb;
+    --surface: #ffffff;
+    --surface-2: #f8fbff;
+    --text: #0f172a;
+    --muted: #64748b;
+    --accent: #2563eb;
+    --accent-2: #60a5fa;
+    --border: rgba(15, 23, 42, 0.12);
+    --shadow: rgba(15, 23, 42, 0.08);
+}
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #020617;
+    --surface: #0f172a;
+    --surface-2: #111c34;
+    --text: #f8fafc;
+    --muted: #94a3b8;
+    --accent: #60a5fa;
+    --accent-2: #38bdf8;
+    --border: rgba(148, 163, 184, 0.24);
+    --shadow: rgba(2, 6, 23, 0.45);
+}
+html, body, .stApp {
+    background: var(--bg) !important;
+    color: var(--text) !important;
+}
+.block-container {
+    padding-top: 1.4rem;
+    padding-bottom: 2rem;
+    max-width: 1400px;
+}
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%) !important;
+    border-right: 1px solid var(--border);
+    color: var(--text) !important;
+}
+[data-testid="stSidebar"] * {
+    color: var(--text) !important;
+}
+[data-testid="stToolbar"] {
+    background: var(--surface) !important;
+    color: var(--text) !important;
+}
+.card, .section-card {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 20px;
+    padding: 18px 20px;
+    box-shadow: 0 8px 24px var(--shadow);
+    margin-bottom: 16px;
+    opacity: 0;
+    animation: fadeInUp 0.45s ease forwards;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card:hover, .section-card:hover {
+    transform: translateY(-2px) scale(1.01);
+    box-shadow: 0 12px 28px var(--shadow);
+}
+.card .title {
+    font-size: 0.84rem;
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 6px;
+    letter-spacing: 0.01em;
+}
+.card .value {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: var(--text);
+}
+.section-title {
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 8px;
+}
+.helper-text {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+.stButton > button, .stDownloadButton > button {
+    border-radius: 999px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: white;
+    border: 1px solid transparent;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.stButton > button:hover, .stDownloadButton > button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.16);
+}
+.stTextInput > div > div > input,
+.stTextArea textarea,
+.stNumberInput input,
+.stSelectbox > div > div,
+.stDateInput input,
+.stCheckbox > label,
+.stRadio > label {
+    background: var(--surface) !important;
+    color: var(--text) !important;
+    border-color: var(--border) !important;
+}
+.stMetric, [data-testid="stMetric"] {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 16px;
+    color: var(--text) !important;
+}
+div[data-testid="stDataFrame"] {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 16px;
+}
+[data-testid="stDataFrame"] * {
+    color: var(--text) !important;
+}
+.stAlert, .stWarning, .stInfo, .stSuccess {
+    border-radius: 12px;
+}
+@keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
 </style>
 """
 
 
-def _apply_styles():
-    st.markdown(_CARD_STYLE, unsafe_allow_html=True)
+def apply_theme_styles():
+    _inject_theme_script()
+    st.markdown(_THEME_STYLE, unsafe_allow_html=True)
 
 
 def render_sidebar():
@@ -30,7 +185,7 @@ def _card(title, content):
 
 
 def render_main(data: dict):
-    _apply_styles()
+    apply_theme_styles()
     st.markdown("# Smart Medicine Box Dashboard")
 
     patient = data["patient"]

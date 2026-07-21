@@ -1,53 +1,71 @@
 import streamlit as st
 from components.sidebar import render_sidebar
-from src.ui import _apply_styles
 
 
 def render_ai():
     render_sidebar()
-    _apply_styles()
 
     st.markdown("# AI Insights")
-    st.markdown("AI Health Summary")
-    st.markdown("Your recent health pattern appears stable with good medication adherence and no immediate concern. The system suggests continued monitoring and routine follow-up.")
+    st.caption("A concise summary of health status and personalized recommendations.")
+    st.divider()
 
-    st.markdown("---")
-    st.subheader("AI Health Score")
-    st.markdown("**88 / 100**")
-    st.markdown("**Status:** Good")
+    with st.container(border=True):
+        st.subheader("AI Health Summary")
+        st.write("Your recent health pattern appears stable with good medication adherence and no immediate concern. The system suggests continued monitoring and routine follow-up.")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("AI Health Score", "88 / 100", "Good")
+        with c2:
+            st.metric("Adherence", "91%", "+4%")
+        with c3:
+            st.metric("Overall Risk", "Low", "Stable")
 
-    st.markdown("---")
-    st.subheader("Medication Adherence")
-    st.markdown("- Medicines Taken: 21")
-    st.markdown("- Missed Doses: 2")
-    st.markdown("- Adherence Percentage: 91%")
+    st.divider()
+    with st.container(border=True):
+        st.subheader("Medication Adherence")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Medicines Taken", "21")
+        with c2:
+            st.metric("Missed Doses", "2")
+        with c3:
+            st.metric("Adherence %", "91%")
 
-    st.markdown("---")
-    st.subheader("Health Risk Analysis")
-    st.markdown("- Heart Health: Low Risk")
-    st.markdown("- Oxygen Level: Normal")
-    st.markdown("- Temperature: Normal")
-    st.markdown("- Overall Risk: Low")
+    st.divider()
+    with st.container(border=True):
+        st.subheader("Health Risk Analysis")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Heart Health", "Low Risk")
+        with c2:
+            st.metric("Oxygen Level", "Normal")
+        with c3:
+            st.metric("Temperature", "Normal")
+        with c4:
+            st.metric("Overall Risk", "Low")
 
-    st.markdown("---")
-    st.subheader("Personalized Recommendations")
-    st.markdown("- Continue taking prescribed medicines on time.")
-    st.markdown("- Keep a light walking routine daily.")
-    st.markdown("- Stay hydrated and maintain regular sleep.")
-    st.markdown("- Review medications with your caregiver weekly.")
-    st.markdown("- Seek medical advice if symptoms worsen.")
+    st.divider()
+    with st.container(border=True):
+        st.subheader("Personalized Recommendations")
+        st.write("• Continue taking prescribed medicines on time.")
+        st.write("• Keep a light walking routine daily.")
+        st.write("• Stay hydrated and maintain regular sleep.")
+        st.write("• Review medications with your caregiver weekly.")
+        st.write("• Seek medical advice if symptoms worsen.")
 
-    st.markdown("---")
-    st.subheader("Emergency Alerts")
-    st.info("No Emergency Detected")
+    st.divider()
+    with st.container(border=True):
+        st.subheader("Emergency Alerts")
+        st.info("No Emergency Detected")
 
-    st.markdown("---")
-    st.subheader("Weekly AI Summary")
-    st.markdown("- Medication adherence remained strong this week.")
-    st.markdown("- Health patterns suggest stable daily activity.")
-    st.markdown("- No urgent alerts were triggered.")
-    st.markdown("- Reminder compliance improved compared to last week.")
-    st.markdown("- Continue routine monitoring and follow-up care.")
+    st.divider()
+    with st.container(border=True):
+        st.subheader("Weekly AI Summary")
+        st.write("• Medication adherence remained strong this week.")
+        st.write("• Health patterns suggest stable daily activity.")
+        st.write("• No urgent alerts were triggered.")
+        st.write("• Reminder compliance improved compared to last week.")
+        st.write("• Continue routine monitoring and follow-up care.")
 
 
 render_ai()
