@@ -2,11 +2,13 @@ import streamlit as st
 from components.sidebar import render_sidebar
 from src.data import get_all_dummy_data
 from src.ui import set_theme
+from src.ui import apply_theme_styles
 
 
 def render_settings():
     data = get_all_dummy_data()
     render_sidebar()
+    apply_theme_styles()
 
     st.markdown("# Settings")
     st.subheader("Theme")
@@ -15,9 +17,11 @@ def render_settings():
         "Select Theme",
         ["Dark", "Light"],
         index=0 if current_theme == "Dark" else 1,
-        key="theme",
+        key="app_theme",
     )
     set_theme(selected_theme)
+    st.session_state["theme"] = selected_theme
+
 
     st.markdown("---")
     st.subheader("Notifications")

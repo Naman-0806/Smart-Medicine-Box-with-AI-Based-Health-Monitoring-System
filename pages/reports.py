@@ -1,11 +1,13 @@
 import streamlit as st
 from src.data import get_all_dummy_data
 from components.sidebar import render_sidebar
+from src.ui import apply_theme_styles
 
 
 def render_reports():
     data = get_all_dummy_data()
     render_sidebar()
+    apply_theme_styles()
 
     st.markdown("# Reports")
     st.caption("Review and export patient activity summaries.")

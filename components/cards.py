@@ -1,16 +1,16 @@
 import streamlit as st
-from src.ui import _apply_styles
+from src.ui import apply_theme_styles
 
 
 def small_card(title: str, content: str):
-    _apply_styles()
+    apply_theme_styles()
     with st.container(border=True):
         st.markdown(f"<div class='title'>{title}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='value'>{content}</div>", unsafe_allow_html=True)
 
 
 def patient_card(patient: dict):
-    _apply_styles()
+    apply_theme_styles()
     with st.container(border=True):
         st.markdown("<div class='section-title'>Patient Snapshot</div>", unsafe_allow_html=True)
         st.write(f"**Name:** {patient.get('name', '—')}")

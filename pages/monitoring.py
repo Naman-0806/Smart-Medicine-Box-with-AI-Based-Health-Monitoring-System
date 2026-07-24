@@ -3,7 +3,7 @@ import streamlit as st
 from firebase.firebase_service import get_dashboard_data
 from components.sidebar import render_sidebar
 from components.charts import heart_rate_chart, spo2_chart, temperature_chart
-
+from src.ui import apply_theme_styles
 
 def _render_overview(metrics, patient):
     st.subheader("Live Health Overview")
@@ -94,6 +94,7 @@ def render_monitoring():
     render_sidebar()
 
     st.markdown("# Health Monitoring")
+    apply_theme_styles()
     st.caption("Real-time vitals and reminders in a cleaner, more scannable layout.")
     st.divider()
     data = st.session_state["monitoring_data"]

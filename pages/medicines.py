@@ -2,6 +2,7 @@ import streamlit as st
 from src.data import get_all_dummy_data
 from components.sidebar import render_sidebar
 from components.tables import medicine_table
+from src.ui import apply_theme_styles
 
 
 def _get_medicine_frame():

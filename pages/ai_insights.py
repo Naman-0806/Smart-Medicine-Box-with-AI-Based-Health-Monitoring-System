@@ -1,8 +1,10 @@
 import streamlit as st
 from components.sidebar import render_sidebar
+from src.ui import apply_theme_styles
 
 
 def render_ai():
+    apply_theme_styles() 
     render_sidebar()
 
     st.markdown("# AI Insights")
