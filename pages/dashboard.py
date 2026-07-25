@@ -75,8 +75,14 @@ def _render_progress_indicators(health_score, spo2, heart_rate):
 
 
 def render_dashboard():
-    data = get_dashboard_data() or {}
     render_sidebar()
+
+    selected_patient_id = st.session_state.get("selected_patient_id")
+    if not selected_patient_id:
+        st.info("Please select a patient from the Patient page to view dashboard data.")
+        return
+
+    data = get_dashboard_data(selected_patient_id) or {}
 
     if data.get("offline"):
         st.warning("Running in Offline Mode")
