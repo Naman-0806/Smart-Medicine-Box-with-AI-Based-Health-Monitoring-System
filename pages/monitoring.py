@@ -80,15 +80,16 @@ def _render_medicine_reminder(medicines):
 
 def render_monitoring():
     refresh_interval = 5
+    selected_patient_id = st.session_state.get("selected_patient_id")
     if "monitoring_data" not in st.session_state:
-        st.session_state["monitoring_data"] = get_dashboard_data()
+        st.session_state["monitoring_data"] = get_dashboard_data(selected_patient_id)
 
     if "monitoring_last_refresh" not in st.session_state:
         st.session_state["monitoring_last_refresh"] = time.time()
 
     now = time.time()
     if now - st.session_state["monitoring_last_refresh"] >= refresh_interval:
-        st.session_state["monitoring_data"] = get_dashboard_data()
+        st.session_state["monitoring_data"] = get_dashboard_data(selected_patient_id)
         st.session_state["monitoring_last_refresh"] = now
 
     render_sidebar()

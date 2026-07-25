@@ -1,19 +1,23 @@
+import pandas as pd
 import streamlit as st
+from firebase.firebase_service import delete_patient_medicine, get_medicine_schedule, save_patient_medicine
 from src.data import get_all_dummy_data
 from components.sidebar import render_sidebar
 from components.tables import medicine_table
 from src.ui import apply_theme_styles
 
 
-def _get_medicine_frame():
-    base_data = get_all_dummy_data()
-    medicine_df = base_data["medicines"].copy()
-    for column in ["Medicine", "Dosage", "Time", "Status"]:
-        if column not in medicine_df.columns:
-            medicine_df[column] = ""
-    medicine_df = medicine_df[["Medicine", "Dosage", "Time", "Status"]].copy()
-    medicine_df = medicine_df.fillna("")
-    return medicine_df.reset_index(drop=True)
+def _get_medicine_frame(patient_id=None):
+    df = get_medicine_schedule(patient_id)
+    if not isinstance(df, pd.DataFrame):
+        base_data = get_all_dummy_data()
+        df = base_data["medicines"].copy()
+    for column in ["id", "Medicine", "Dosage", "Time", "Status"]:
+        if column not in df.columns:
+            df[column] = ""
+    df = df[["id", "Medicine", "Dosage", "Time", "Status"]].copy()
+    df = df.fillna("")
+    return df.reset_index(drop=True)
 
 
 def _get_status_options(medicine_df):
@@ -28,8 +32,19 @@ def render_medicines():
     st.caption("Manage the patient's medication schedule.")
     st.divider()
 
-    if "medicine_df" not in st.session_state:
-        st.session_state["medicine_df"] = _get_medicine_frame()
+    selected_patient_id = st.session_state.get("selected_patient_id")
+    if selected_patient_id:
+        st.caption(f"Connected to patient: **{selected_patient_id}**")
+    else:
+        st.info("No patient selected. Changes will apply locally until a patient is selected.")
+
+    if (
+        "medicine_df" not in st.session_state
+        or st.session_state.get("medicine_patient_id") != selected_patient_id
+    ):
+        st.session_state["medicine_df"] = _get_medicine_frame(selected_patient_id)
+        st.session_state["medicine_patient_id"] = selected_patient_id
+
     if "medicine_edit_index" not in st.session_state:
         st.session_state["medicine_edit_index"] = None
 
@@ -49,14 +64,20 @@ def render_medicines():
                 status_value = st.selectbox("Status", ["Taken", "Missed", "Upcoming"], index=2)
             submitted = st.form_submit_button("Add Medicine")
             if submitted and medicine_name.strip():
-                medicine_df.loc[len(medicine_df)] = {
+                med_payload = {
                     "Medicine": medicine_name.strip(),
                     "Dosage": dosage.strip(),
                     "Time": time_value.strip(),
                     "Status": status_value,
                 }
-                st.session_state["medicine_df"] = medicine_df.reset_index(drop=True)
+                if selected_patient_id:
+                    save_patient_medicine(selected_patient_id, med_payload)
+                    st.session_state["medicine_df"] = _get_medicine_frame(selected_patient_id)
+                else:
+                    medicine_df.loc[len(medicine_df)] = med_payload
+                    st.session_state["medicine_df"] = medicine_df.reset_index(drop=True)
                 st.success("Medicine added.")
+                st.rerun()
 
     edit_index = st.session_state.get("medicine_edit_index")
     if edit_index is not None and edit_index < len(medicine_df):
@@ -78,17 +99,28 @@ def render_medicines():
                 save_clicked = st.form_submit_button("Save Changes")
                 cancel_clicked = st.form_submit_button("Cancel")
                 if save_clicked and edited_name.strip():
-                    medicine_df.loc[edit_index] = {
+                    med_payload = {
                         "Medicine": edited_name.strip(),
                         "Dosage": edited_dosage.strip(),
                         "Time": edited_time.strip(),
                         "Status": edited_status,
                     }
-                    st.session_state["medicine_df"] = medicine_df.reset_index(drop=True)
+                    med_id = str(row.get("id")) if row.get("id") else None
+                    if selected_patient_id and med_id:
+                        save_patient_medicine(selected_patient_id, med_payload, medicine_id=med_id)
+                        st.session_state["medicine_df"] = _get_medicine_frame(selected_patient_id)
+                    else:
+                        medicine_df.loc[edit_index] = {
+                            "id": med_id or "",
+                            **med_payload,
+                        }
+                        st.session_state["medicine_df"] = medicine_df.reset_index(drop=True)
                     st.session_state["medicine_edit_index"] = None
                     st.success("Medicine updated.")
+                    st.rerun()
                 elif cancel_clicked:
                     st.session_state["medicine_edit_index"] = None
+                    st.rerun()
 
     st.divider()
     with st.container(border=True):
@@ -122,10 +154,16 @@ def render_medicines():
                 with c3:
                     if st.button("Edit", key=f"edit_row_{index}"):
                         st.session_state["medicine_edit_index"] = int(index)
+                        st.rerun()
                 with c4:
                     if st.button("Delete", key=f"delete_row_{index}"):
-                        medicine_df = medicine_df.drop(index=int(index)).reset_index(drop=True)
-                        st.session_state["medicine_df"] = medicine_df
+                        med_id = str(row.get("id")) if row.get("id") else None
+                        if selected_patient_id and med_id:
+                            delete_patient_medicine(selected_patient_id, med_id)
+                            st.session_state["medicine_df"] = _get_medicine_frame(selected_patient_id)
+                        else:
+                            medicine_df = medicine_df.drop(index=int(index)).reset_index(drop=True)
+                            st.session_state["medicine_df"] = medicine_df
                         st.session_state["medicine_edit_index"] = None
                         st.success("Medicine removed.")
                         st.rerun()

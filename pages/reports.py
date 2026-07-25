@@ -1,11 +1,13 @@
 import streamlit as st
+from firebase.firebase_service import get_dashboard_data
 from src.data import get_all_dummy_data
 from components.sidebar import render_sidebar
 from src.ui import apply_theme_styles
 
 
 def render_reports():
-    data = get_all_dummy_data()
+    selected_patient_id = st.session_state.get("selected_patient_id")
+    data = get_dashboard_data(selected_patient_id) if selected_patient_id else get_all_dummy_data()
     render_sidebar()
     apply_theme_styles()
 

@@ -18,6 +18,7 @@ health_metrics = {
     "heart_rate": 76,
     "spo2": 97,
     "temperature": 36.7,
+    "blood_pressure": "120/80",
     "health_score": 88,
 }
 
