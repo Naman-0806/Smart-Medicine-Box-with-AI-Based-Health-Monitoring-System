@@ -116,7 +116,7 @@ def check_duplicate_patient(
 
 
 def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[str] = None) -> Optional[str]:
-    """Save patient data to Firebase under /patients/{patient_id} with ownerUid scoping."""
+    """Save or update patient profile in Firebase under /patients/{uid} using the user's Auth UID."""
     client = get_firestore_client()
     if not isinstance(patient_data, dict):
         return None
@@ -129,44 +129,48 @@ def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[
             owner_uid = None
 
     final_owner = owner_uid or patient_data.get("ownerUid") or patient_data.get("owner_uid") or "demo_user"
-
-    patient_id = f"PT-{uuid.uuid4().hex[:8].upper()}"
+    patient_id = final_owner  # Store directly under patients/{uid}
     now_iso = datetime.utcnow().isoformat()
+
+    doc_ref = client.collection("patients").document(patient_id) if client else None
+    existing_doc = doc_ref.get() if doc_ref else None
+    existing_data = existing_doc.to_dict() if (existing_doc and existing_doc.exists) else {}
 
     payload = {
         "patient_id": patient_id,
         "ownerUid": final_owner,
         "owner_uid": final_owner,
-        "name": patient_data.get("name") or patient_data.get("full_name") or "",
-        "full_name": patient_data.get("full_name") or patient_data.get("name") or "",
-        "age": patient_data.get("age"),
-        "gender": patient_data.get("gender") or "Other",
-        "dob": str(patient_data.get("dob") or ""),
-        "blood_group": patient_data.get("blood_group") or "A+",
-        "height": patient_data.get("height"),
-        "weight": patient_data.get("weight"),
-        "phone_number": patient_data.get("phone_number") or "",
-        "email": patient_data.get("email") or "",
-        "address": patient_data.get("address") or "",
-        "emergency_name": patient_data.get("emergency_name") or "",
-        "emergency_phone": patient_data.get("emergency_phone") or "",
-        "disease": patient_data.get("disease") or patient_data.get("existing_diseases") or "",
-        "existing_diseases": patient_data.get("existing_diseases") or patient_data.get("disease") or "",
-        "allergies": patient_data.get("allergies") or "",
-        "current_medications": patient_data.get("current_medications") or "",
-        "doctor_name": patient_data.get("doctor_name") or "Dr. Assigned",
-        "hospital_name": patient_data.get("hospital_name") or "",
-        "medicine_box_id": patient_data.get("medicine_box_id") or f"BOX-{uuid.uuid4().hex[:4].upper()}",
-        "device_serial_number": patient_data.get("device_serial_number") or f"DEV-{uuid.uuid4().hex[:6].upper()}",
-        "device_status": "Connected",
-        "battery_level": 90,
-        "created_at": now_iso,
+        "name": patient_data.get("name") or patient_data.get("full_name") or existing_data.get("name") or "",
+        "full_name": patient_data.get("full_name") or patient_data.get("name") or existing_data.get("full_name") or "",
+        "age": patient_data.get("age") if patient_data.get("age") is not None else existing_data.get("age"),
+        "gender": patient_data.get("gender") or existing_data.get("gender") or "Other",
+        "dob": str(patient_data.get("dob") or existing_data.get("dob") or ""),
+        "blood_group": patient_data.get("blood_group") or existing_data.get("blood_group") or "A+",
+        "height": patient_data.get("height") if patient_data.get("height") is not None else existing_data.get("height"),
+        "weight": patient_data.get("weight") if patient_data.get("weight") is not None else existing_data.get("weight"),
+        "phone_number": patient_data.get("phone_number") or existing_data.get("phone_number") or "",
+        "email": patient_data.get("email") or existing_data.get("email") or "",
+        "address": patient_data.get("address") or existing_data.get("address") or "",
+        "emergency_name": patient_data.get("emergency_name") or existing_data.get("emergency_name") or "",
+        "emergency_phone": patient_data.get("emergency_phone") or existing_data.get("emergency_phone") or "",
+        "disease": patient_data.get("disease") or patient_data.get("existing_diseases") or existing_data.get("disease") or "",
+        "existing_diseases": patient_data.get("existing_diseases") or patient_data.get("disease") or existing_data.get("existing_diseases") or "",
+        "allergies": patient_data.get("allergies") or existing_data.get("allergies") or "",
+        "current_medications": patient_data.get("current_medications") or existing_data.get("current_medications") or "",
+        "doctor_name": patient_data.get("doctor_name") or existing_data.get("doctor_name") or "Dr. Assigned",
+        "hospital_name": patient_data.get("hospital_name") or existing_data.get("hospital_name") or "",
+        "medicine_box_id": patient_data.get("medicine_box_id") or existing_data.get("medicine_box_id") or f"BOX-{final_owner[:6].upper()}",
+        "device_serial_number": patient_data.get("device_serial_number") or existing_data.get("device_serial_number") or f"DEV-{final_owner[:6].upper()}",
+        "device_status": existing_data.get("device_status", "Connected"),
+        "battery_level": existing_data.get("battery_level", 90),
+        "created_at": existing_data.get("created_at", now_iso),
+        "updated_at": now_iso,
         "last_sync": now_iso,
     }
 
-    if client is not None:
+    if doc_ref is not None:
         try:
-            client.collection("patients").document(patient_id).set(payload)
+            doc_ref.set(payload, merge=True)
             invalidate_firebase_cache()
             return patient_id
         except Exception:
@@ -411,26 +415,18 @@ def process_esp32_data(
     if not patient_id:
         try:
             import streamlit as st
-            patient_id = st.session_state.get("selected_patient_id")
+            patient_id = st.session_state.get("user_uid") or st.session_state.get("owner_uid") or st.session_state.get("selected_patient_id")
         except Exception:
             patient_id = None
 
     if not patient_id:
-        try:
-            import streamlit as st
-            owner_uid = st.session_state.get("owner_uid")
-        except Exception:
-            owner_uid = None
-
-        patients = get_all_patients(owner_uid=owner_uid)
-        if patients:
-            patient_id = patients[0].get("patient_id") or patients[0].get("id")
-        else:
-            patient_id = "PT-ESP32-DEFAULT"
+        return {"success": False, "error": "Authentication / Patient ID required."}
 
     now_iso = datetime.utcnow().isoformat()
     reading_payload = {
         "patient_id": patient_id,
+        "ownerUid": patient_id,
+        "owner_uid": patient_id,
         "heart_rate": float(heart_rate),
         "spo2": float(spo2),
         "temperature": float(temperature),
@@ -440,12 +436,11 @@ def process_esp32_data(
     }
 
     _ESP32_LIVE_CACHE[patient_id] = reading_payload
-    _ESP32_LIVE_CACHE["latest"] = reading_payload
 
     doc_id = save_health_reading(patient_id, reading_payload)
 
     client = get_firestore_client()
-    if client and patient_id and patient_id != "PT-ESP32-DEFAULT":
+    if client and patient_id:
         try:
             client.collection("patients").document(patient_id).set({
                 "latest_vitals": reading_payload,
@@ -586,7 +581,7 @@ def get_patient_medicines(patient_id: Optional[str] = None) -> List[Dict[str, An
 
 
 def save_patient_medicine(patient_id: str, medicine_data: Dict[str, Any], medicine_id: Optional[str] = None) -> Optional[str]:
-    """Add or update a medicine document in Firebase under /patients/{patient_id}/medicines/{medicine_id}."""
+    """Add or update a medicine document under /patients/{patient_id}/medicines/{doc_id} and root /medicines collection linked to user's UID."""
     if not patient_id or not isinstance(medicine_data, dict):
         return None
 
@@ -597,6 +592,10 @@ def save_patient_medicine(patient_id: str, medicine_data: Dict[str, Any], medici
     doc_id = medicine_id or f"MED-{uuid.uuid4().hex[:8].upper()}"
     payload = {
         "id": doc_id,
+        "medicine_id": doc_id,
+        "patient_id": patient_id,
+        "ownerUid": patient_id,
+        "owner_uid": patient_id,
         "medicine_name": medicine_data.get("Medicine") or medicine_data.get("medicine_name") or "",
         "dosage": medicine_data.get("Dosage") or medicine_data.get("dosage") or "",
         "time": medicine_data.get("Time") or medicine_data.get("time") or "",
@@ -605,7 +604,10 @@ def save_patient_medicine(patient_id: str, medicine_data: Dict[str, Any], medici
     }
 
     try:
+        # Write to patient subcollection
         client.collection("patients").document(patient_id).collection("medicines").document(doc_id).set(payload)
+        # Write to root /medicines collection linked to ownerUid
+        client.collection("medicines").document(doc_id).set(payload)
         invalidate_firebase_cache()
         return doc_id
     except Exception:
@@ -613,7 +615,7 @@ def save_patient_medicine(patient_id: str, medicine_data: Dict[str, Any], medici
 
 
 def delete_patient_medicine(patient_id: str, medicine_id: str) -> bool:
-    """Delete a medicine document from Firebase under /patients/{patient_id}/medicines/{medicine_id}."""
+    """Delete a medicine document from Firebase under subcollection and root /medicines collection."""
     if not patient_id or not medicine_id:
         return False
 
@@ -623,6 +625,7 @@ def delete_patient_medicine(patient_id: str, medicine_id: str) -> bool:
 
     try:
         client.collection("patients").document(patient_id).collection("medicines").document(medicine_id).delete()
+        client.collection("medicines").document(medicine_id).delete()
         invalidate_firebase_cache()
         return True
     except Exception:
@@ -799,7 +802,7 @@ def get_ai_recommendations(patient_id: Optional[str] = None) -> List[str]:
 
 
 def save_health_reading(patient_id: str, reading_data: Dict[str, Any]) -> Optional[str]:
-    """Store a health reading document in Firebase strictly under /patients/{patient_id}/health."""
+    """Store a health reading document in Firebase under subcollection and root /health_metrics collection linked to user UID."""
     if not patient_id or not isinstance(reading_data, dict):
         return None
 
@@ -811,7 +814,10 @@ def save_health_reading(patient_id: str, reading_data: Dict[str, Any]) -> Option
     timestamp = reading_data.get("timestamp") or datetime.utcnow().isoformat()
     payload = {
         "id": doc_id,
+        "reading_id": doc_id,
         "patient_id": patient_id,
+        "ownerUid": patient_id,
+        "owner_uid": patient_id,
         "heart_rate": reading_data.get("heart_rate") or reading_data.get("heartRate"),
         "spo2": reading_data.get("spo2") or reading_data.get("spO2"),
         "temperature": reading_data.get("temperature") or reading_data.get("temp"),
@@ -823,13 +829,15 @@ def save_health_reading(patient_id: str, reading_data: Dict[str, Any]) -> Option
     try:
         p_ref = client.collection("patients").document(patient_id)
         p_ref.collection("health").document(doc_id).set(payload)
+        p_ref.collection("health_metrics").document(doc_id).set(payload)
+        client.collection("health_metrics").document(doc_id).set(payload)
         return doc_id
     except Exception:
         return None
 
 
 def get_patient_health_readings(patient_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Return stored health readings for a patient strictly from Firebase subcollection /patients/{patient_id}/health."""
+    """Return stored health readings for a patient strictly from Firebase subcollection /patients/{patient_id}/health or root /health_metrics."""
     if not patient_id:
         return []
 
@@ -839,11 +847,21 @@ def get_patient_health_readings(patient_id: Optional[str] = None) -> List[Dict[s
 
     readings: List[Dict[str, Any]] = []
     try:
-        docs = client.collection("patients").document(patient_id).collection("health").stream()
-        for doc in docs:
-            data = doc.to_dict() or {}
-            data["id"] = doc.id
-            readings.append(data)
+        for col_name in ["health", "health_metrics"]:
+            docs = client.collection("patients").document(patient_id).collection(col_name).stream()
+            for doc in docs:
+                data = doc.to_dict() or {}
+                data["id"] = doc.id
+                readings.append(data)
+            if readings:
+                break
+
+        if not readings:
+            docs = client.collection("health_metrics").where("ownerUid", "==", patient_id).stream()
+            for doc in docs:
+                data = doc.to_dict() or {}
+                data["id"] = doc.id
+                readings.append(data)
     except Exception:
         pass
 
@@ -948,7 +966,7 @@ def get_dashboard_data(patient_id: Optional[str] = None, owner_uid: Optional[str
 
 
 def save_patient_report(patient_id: str, report_metadata: Dict[str, Any]) -> Optional[str]:
-    """Store a generated report document in Firebase strictly under /patients/{patient_id}/reports/{report_id}."""
+    """Store a generated report document under subcollection /patients/{patient_id}/reports and root /reports collection."""
     if not patient_id or not isinstance(report_metadata, dict):
         return None
 
@@ -963,15 +981,18 @@ def save_patient_report(patient_id: str, report_metadata: Dict[str, Any]) -> Opt
         "id": doc_id,
         "report_id": doc_id,
         "patient_id": patient_id,
+        "ownerUid": patient_id,
+        "owner_uid": patient_id,
         "report_type": report_metadata.get("report_type") or "PDF",
         "file_name": report_metadata.get("file_name") or f"report_{patient_id}.pdf",
         "health_score": report_metadata.get("health_score"),
         "created_at": timestamp,
-        "generated_by": report_metadata.get("generated_by") or "",
+        "generated_by": report_metadata.get("generated_by") or patient_id,
     }
 
     try:
         client.collection("patients").document(patient_id).collection("reports").document(doc_id).set(payload)
+        client.collection("reports").document(doc_id).set(payload)
         return doc_id
     except Exception:
         return None

@@ -1,10 +1,8 @@
 import streamlit as st
 from components.sidebar import render_sidebar
-from firebase.firebase_service import get_patient_by_id
-from src.ui import set_theme, apply_theme_styles
-
-
 from firebase.auth_service import require_auth
+from firebase.firebase_service import get_patient_by_id
+from src.ui import apply_theme_styles, set_theme
 
 
 def render_settings():
@@ -12,8 +10,8 @@ def render_settings():
     require_auth()
     apply_theme_styles()
 
-    selected_patient_id = st.session_state.get("selected_patient_id")
-    patient = get_patient_by_id(selected_patient_id) or {}
+    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+    patient = get_patient_by_id(owner_uid, owner_uid=owner_uid) or {}
 
     st.markdown("# Settings")
     st.subheader("Theme")
@@ -34,10 +32,11 @@ def render_settings():
 
     st.markdown("---")
     st.subheader("Device Settings")
-    st.markdown(f"- Connected Patient: **{patient.get('name', 'N/A')}**")
-    st.markdown(f"- Patient / Box ID: `{patient.get('patient_id') or patient.get('id') or 'N/A'}`")
+    p_name = patient.get('name') or patient.get('full_name') or 'No data available'
+    p_id = patient.get('patient_id') or patient.get('id') or 'No data available'
+    st.markdown(f"- Connected Patient: **{p_name}**")
+    st.markdown(f"- Patient / Box ID: `{p_id}`")
     st.button("Reconnect Device")
 
 
 render_settings()
-

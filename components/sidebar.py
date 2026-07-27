@@ -1,6 +1,6 @@
 import streamlit as st
 from firebase.auth_service import login_user, logout_user, signup_user
-from firebase.firebase_service import get_all_patients
+from firebase.firebase_service import get_patient_by_id
 from src.ui import apply_theme_styles
 
 PAGES = [
@@ -20,58 +20,30 @@ def render_sidebar():
 
     is_logged_in = st.session_state.get("is_logged_in", False)
     auth_user = st.session_state.get("auth_user") or {}
-    owner_uid = st.session_state.get("owner_uid")
+    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
 
-    if is_logged_in and auth_user:
+    if is_logged_in and auth_user and owner_uid:
         user_name = auth_user.get("full_name") or auth_user.get("email", "").split("@")[0] or "User"
         user_email = auth_user.get("email") or ""
+
+        # Enforce user-specific patient ID session mapping
+        st.session_state["selected_patient_id"] = owner_uid
+        st.session_state["owner_uid"] = owner_uid
 
         st.sidebar.success(f"🟢 Logged in as:\n**{user_name}**")
         if user_email:
             st.sidebar.caption(f"📧 {user_email}")
 
+        patient = get_patient_by_id(owner_uid, owner_uid=owner_uid)
+        if patient:
+            st.sidebar.markdown(f"👤 Profile: **{patient.get('name') or patient.get('full_name')}**")
+            st.sidebar.caption(f"ID: `{owner_uid}`")
+        else:
+            st.sidebar.info("📝 No patient profile registered yet.")
+
         if st.sidebar.button("🚪 Logout", key="sidebar_logout_btn", use_container_width=True):
             logout_user()
             st.rerun()
-
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("#### Active Patient Selector")
-
-        user_patients = get_all_patients(owner_uid=owner_uid)
-        patient_options = {}
-
-        if user_patients:
-            for p in user_patients:
-                p_id = p.get("patient_id") or p.get("id") or ""
-                p_name = p.get("name") or p.get("full_name") or "Unnamed Patient"
-                label = f"{p_name} ({p_id})" if p_id else p_name
-                patient_options[label] = p_id
-
-            option_labels = list(patient_options.keys())
-            current_selected_id = st.session_state.get("selected_patient_id")
-
-            default_index = 0
-            if current_selected_id:
-                for idx, label in enumerate(option_labels):
-                    if patient_options[label] == current_selected_id:
-                        default_index = idx
-                        break
-            else:
-                st.session_state["selected_patient_id"] = patient_options[option_labels[0]]
-
-            selected_label = st.sidebar.selectbox(
-                "Select Patient",
-                option_labels,
-                index=default_index,
-                key="sidebar_user_patient_selector"
-            )
-            new_selected_id = patient_options[selected_label]
-            if st.session_state.get("selected_patient_id") != new_selected_id:
-                st.session_state["selected_patient_id"] = new_selected_id
-                st.rerun()
-        else:
-            st.session_state["selected_patient_id"] = None
-            st.sidebar.warning("No patients registered yet.")
 
     else:
         st.sidebar.markdown("### 🔐 Firebase Authentication")
