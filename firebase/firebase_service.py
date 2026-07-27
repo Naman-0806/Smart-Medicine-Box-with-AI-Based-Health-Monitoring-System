@@ -98,8 +98,81 @@ def get_patient_data() -> Dict[str, Any]:
     return _get_first_record("Patient") or get_all_dummy_data()["patient"]
 
 
+_ESP32_LIVE_CACHE: Dict[str, Any] = {}
+
+
+def process_esp32_data(
+    heart_rate: float,
+    spo2: float,
+    temperature: float,
+    patient_id: Optional[str] = None,
+    blood_pressure: Optional[str] = "120/80"
+) -> Dict[str, Any]:
+    """Receive heart_rate, spo2, and temperature from ESP32, store received values in Firebase, and evaluate emergency alerts."""
+    if not patient_id:
+        try:
+            import streamlit as st
+            patient_id = st.session_state.get("selected_patient_id")
+        except Exception:
+            patient_id = None
+    if not patient_id:
+        patients = get_all_patients()
+        if patients:
+            patient_id = patients[0].get("patient_id") or patients[0].get("id")
+        else:
+            patient_id = "PT-ESP32-DEFAULT"
+
+    now_iso = datetime.utcnow().isoformat()
+    reading_payload = {
+        "patient_id": patient_id,
+        "heart_rate": float(heart_rate),
+        "spo2": float(spo2),
+        "temperature": float(temperature),
+        "blood_pressure": blood_pressure or "120/80",
+        "timestamp": now_iso,
+        "source": "ESP32_Device"
+    }
+
+    # Store in memory live cache for instant precedence
+    _ESP32_LIVE_CACHE[patient_id] = reading_payload
+    _ESP32_LIVE_CACHE["latest"] = reading_payload
+
+    # Save to Firebase subcollection /patients/{patient_id}/readings
+    doc_id = save_health_reading(patient_id, reading_payload)
+
+    # Save to patient document latest_vitals
+    client = get_firestore_client()
+    if client and patient_id:
+        try:
+            client.collection("patients").document(patient_id).set({
+                "latest_vitals": reading_payload,
+                "heart_rate": float(heart_rate),
+                "spo2": float(spo2),
+                "temperature": float(temperature),
+                "blood_pressure": blood_pressure or "120/80",
+                "last_sync": now_iso
+            }, merge=True)
+
+            client.collection("esp32_telemetry").document(f"ESP-{uuid.uuid4().hex[:8].upper()}").set(reading_payload)
+        except Exception:
+            pass
+
+    # Automatically trigger & save emergency alerts if vitals breach thresholds
+    alerts = check_and_trigger_vitals_alerts(patient_id, reading_payload)
+
+    return {
+        "success": True,
+        "reading_id": doc_id or f"READING-{uuid.uuid4().hex[:8].upper()}",
+        "patient_id": patient_id,
+        "vitals": reading_payload,
+        "alerts_triggered": len(alerts)
+    }
+
+
 def get_health_metrics(patient_id: Optional[str] = None) -> Dict[str, Any]:
-    """Return health metrics (heart rate, SpO2, temperature, blood pressure, health score) from Firebase for the selected patient."""
+    """Return health metrics (heart rate, SpO2, temperature, blood pressure, health score) from Firebase for the selected patient.
+    Prioritizes live ESP32 & Firebase sensor data over dummy values.
+    """
     default_metrics = get_all_dummy_data()["metrics"]
     metrics: Dict[str, Any] = {}
 
@@ -129,46 +202,74 @@ def get_health_metrics(patient_id: Optional[str] = None) -> Dict[str, Any]:
 
         return extracted
 
+    # Check ESP32 live cache first
+    if patient_id and patient_id in _ESP32_LIVE_CACHE:
+        metrics.update(_extract_metrics_from_dict(_ESP32_LIVE_CACHE[patient_id]))
+    elif "latest" in _ESP32_LIVE_CACHE and not patient_id:
+        metrics.update(_extract_metrics_from_dict(_ESP32_LIVE_CACHE["latest"]))
+
+
     if patient_id:
         patient = get_patient_by_id(patient_id)
         if patient:
             metrics.update(_extract_metrics_from_dict(patient))
+            if "latest_vitals" in patient and isinstance(patient["latest_vitals"], dict):
+                metrics.update(_extract_metrics_from_dict(patient["latest_vitals"]))
 
-        if client and len(metrics) < 5:
+        if client and len(metrics) < 4:
             try:
-                for col in ["health_metrics", "Health Metrics", "metrics", "vitals"]:
-                    doc = client.collection(col).document(patient_id).get()
-                    if doc.exists:
-                        doc_data = doc.to_dict() or {}
-                        extracted = _extract_metrics_from_dict(doc_data)
-                        for k, v in extracted.items():
-                            metrics.setdefault(k, v)
+                sub_docs = list(client.collection("patients").document(patient_id).collection("readings").limit(10).stream())
+                if sub_docs:
+                    latest_doc = sub_docs[-1].to_dict() or {}
+                    extracted = _extract_metrics_from_dict(latest_doc)
+                    for k, v in extracted.items():
+                        metrics.setdefault(k, v)
             except Exception:
                 pass
 
-            try:
-                for subcol in ["health_metrics", "metrics", "vitals"]:
-                    sub_docs = list(client.collection("patients").document(patient_id).collection(subcol).limit(1).stream())
-                    if sub_docs:
-                        doc_data = sub_docs[0].to_dict() or {}
-                        extracted = _extract_metrics_from_dict(doc_data)
-                        for k, v in extracted.items():
-                            metrics.setdefault(k, v)
-            except Exception:
-                pass
+    if client and ("heart_rate" not in metrics or "spo2" not in metrics or "temperature" not in metrics):
+        try:
+            esp_docs = list(client.collection("esp32_telemetry").limit(1).stream())
+            if esp_docs:
+                extracted = _extract_metrics_from_dict(esp_docs[0].to_dict() or {})
+                for k, v in extracted.items():
+                    metrics.setdefault(k, v)
+        except Exception:
+            pass
 
-    if len(metrics) < 5:
-        first_rec = _get_first_record("Health Metrics") or _get_first_record("health_metrics")
-        if first_rec:
-            extracted = _extract_metrics_from_dict(first_rec)
-            for k, v in extracted.items():
-                metrics.setdefault(k, v)
+    # Dynamic calculation of health_score if live vitals are available
+    if any(k in metrics for k in ["heart_rate", "spo2", "temperature"]):
+        score = 100
+        try:
+            hr = float(metrics.get("heart_rate", 75))
+            if hr > 100 or hr < 60:
+                score -= 15
+        except (TypeError, ValueError):
+            pass
 
+        try:
+            spo2 = float(metrics.get("spo2", 98))
+            if spo2 < 95:
+                score -= int((95 - spo2) * 5)
+        except (TypeError, ValueError):
+            pass
+
+        try:
+            temp = float(metrics.get("temperature", 36.8))
+            if temp > 37.5 or temp < 36.0:
+                score -= 10
+        except (TypeError, ValueError):
+            pass
+
+        metrics["health_score"] = max(0, min(100, score))
+
+    # Do not use dummy values if live data exists; fallback ONLY for missing keys
     for key in ["heart_rate", "spo2", "temperature", "blood_pressure", "health_score"]:
         if key not in metrics or metrics[key] is None:
             metrics[key] = default_metrics.get(key)
 
     return metrics
+
 
 
 def get_patient_medicines(patient_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -274,8 +375,101 @@ def get_medicine_schedule(patient_id: Optional[str] = None) -> Any:
         return get_all_dummy_data()["medicines"]
 
 
+def save_patient_alert(patient_id: Optional[str], alert_data: Dict[str, Any]) -> Optional[str]:
+    """Save an alert document into Firebase under /patients/{patient_id}/alerts/{alert_id}."""
+    if not isinstance(alert_data, dict):
+        return None
+
+    client = get_firestore_client()
+    doc_id = f"ALERT-{uuid.uuid4().hex[:8].upper()}"
+    text = alert_data.get("text") or alert_data.get("message") or alert_data.get("alert") or ""
+    alert_type = alert_data.get("type") or "emergency"
+    payload = {
+        "id": doc_id,
+        "text": str(text),
+        "type": alert_type,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+
+    if client:
+        try:
+            if patient_id:
+                client.collection("patients").document(patient_id).collection("alerts").document(doc_id).set(payload)
+            else:
+                client.collection("Alerts").document(doc_id).set(payload)
+            return doc_id
+        except Exception:
+            pass
+    return None
+
+
+def check_and_trigger_vitals_alerts(patient_id: Optional[str] = None, metrics: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """Automatically check health metrics against emergency thresholds and trigger & save Firebase alerts:
+    - Heart Rate > 100 or < 50
+    - SpO2 < 92
+    - Temperature > 38.5°C
+    """
+    if metrics is None:
+        metrics = get_health_metrics(patient_id)
+
+    triggered_alerts = []
+
+    try:
+        hr = float(metrics.get("heart_rate")) if metrics.get("heart_rate") is not None else None
+    except (TypeError, ValueError):
+        hr = None
+
+    try:
+        spo2 = float(metrics.get("spo2")) if metrics.get("spo2") is not None else None
+    except (TypeError, ValueError):
+        spo2 = None
+
+    try:
+        temp = float(metrics.get("temperature")) if metrics.get("temperature") is not None else None
+    except (TypeError, ValueError):
+        temp = None
+
+    # Heart Rate check: >100 or <50
+    if hr is not None:
+        if hr > 100:
+            triggered_alerts.append({
+                "type": "emergency",
+                "text": f"EMERGENCY: High Heart Rate detected ({int(hr)} bpm > 100 bpm)"
+            })
+        elif hr < 50:
+            triggered_alerts.append({
+                "type": "emergency",
+                "text": f"EMERGENCY: Low Heart Rate detected ({int(hr)} bpm < 50 bpm)"
+            })
+
+    # SpO2 check: <92
+    if spo2 is not None and spo2 < 92:
+        triggered_alerts.append({
+            "type": "emergency",
+            "text": f"EMERGENCY: Low SpO2 level detected ({spo2}% < 92%)"
+        })
+
+
+    # Temperature check: >38.5°C
+    if temp is not None and temp > 38.5:
+        triggered_alerts.append({
+            "type": "emergency",
+            "text": f"EMERGENCY: High Body Temperature detected ({temp}°C > 38.5°C)"
+        })
+
+    # Save triggered alerts to Firebase
+    for alert in triggered_alerts:
+        save_patient_alert(patient_id, alert)
+
+    return triggered_alerts
+
+
 def get_alerts(patient_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Return alert data from Firebase for the selected patient or fallback to general alerts/dummy data."""
+    """Return alert data from Firebase for the selected patient, automatically checking vitals thresholds."""
+    metrics = get_health_metrics(patient_id)
+    emergency_alerts = check_and_trigger_vitals_alerts(patient_id, metrics)
+
+    firebase_alerts: List[Dict[str, Any]] = []
     if patient_id:
         client = get_firestore_client()
         if client:
@@ -283,26 +477,33 @@ def get_alerts(patient_id: Optional[str] = None) -> List[Dict[str, Any]]:
                 docs = client.collection("patients").document(patient_id).collection("alerts").stream()
                 items = [d.to_dict() for d in docs if d.to_dict()]
                 if items:
-                    alerts = []
                     for item in items:
                         text = item.get("text") or item.get("message") or item.get("alert") or ""
-                        alert_type = item.get("type") or ("warning" if "missed" in str(text).lower() or "battery" in str(text).lower() else "info")
-                        alerts.append({"type": alert_type, "text": str(text)})
-                    return alerts
+                        alert_type = item.get("type") or ("emergency" if "EMERGENCY" in str(text) else ("warning" if "missed" in str(text).lower() or "battery" in str(text).lower() else "info"))
+                        firebase_alerts.append({"type": alert_type, "text": str(text)})
             except Exception:
                 pass
 
-    items = _get_collection_data("Alerts")
-    if items is None:
-        return get_all_dummy_data()["alerts"]
+    if not firebase_alerts:
+        items = _get_collection_data("Alerts")
+        if items:
+            for item in items:
+                if isinstance(item, dict):
+                    text = item.get("text") or item.get("message") or item.get("alert") or ""
+                    alert_type = item.get("type") or ("emergency" if "EMERGENCY" in str(text) else ("warning" if "missed" in str(text).lower() or "battery" in str(text).lower() else "info"))
+                    firebase_alerts.append({"type": alert_type, "text": str(text)})
 
-    alerts: List[Dict[str, Any]] = []
-    for item in items:
-        if isinstance(item, dict):
-            text = item.get("text") or item.get("message") or item.get("alert") or ""
-            alert_type = item.get("type") or ("warning" if "missed" in str(text).lower() or "battery" in str(text).lower() else "info")
-            alerts.append({"type": alert_type, "text": str(text)})
-    return alerts or get_all_dummy_data()["alerts"]
+    combined_alerts = []
+    seen_texts = set()
+
+    for a in emergency_alerts + firebase_alerts + get_all_dummy_data()["alerts"]:
+        txt = a.get("text", "").strip()
+        if txt and txt not in seen_texts:
+            seen_texts.add(txt)
+            combined_alerts.append(a)
+
+    return combined_alerts
+
 
 
 def get_ai_recommendations(patient_id: Optional[str] = None) -> List[str]:

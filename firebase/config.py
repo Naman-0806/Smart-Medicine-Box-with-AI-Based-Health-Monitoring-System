@@ -3,14 +3,16 @@ from typing import Any
 
 try:
     import firebase_admin
-    from firebase_admin import credentials, firestore
+    from firebase_admin import auth, credentials, firestore
 except Exception:
     firebase_admin = None
+    auth = None
     credentials = None
     firestore = None
 
 
 _FIREBASE_APP = None
+
 
 
 def initialize_firebase() -> Any:
@@ -46,3 +48,14 @@ def get_firestore_client() -> Any:
     if getattr(firebase_admin, "_apps", None):
         return firestore.client()
     return None
+
+
+def get_firebase_auth() -> Any:
+    """Return firebase_admin.auth module when Firebase is initialized."""
+    initialize_firebase()
+    if firebase_admin is None or auth is None:
+        return None
+    if getattr(firebase_admin, "_apps", None):
+        return auth
+    return None
+

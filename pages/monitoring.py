@@ -32,7 +32,7 @@ def _render_overview(metrics, patient):
             st.metric("Last Sync Time", patient.get('last_sync', 'N/A'))
 
 
-def _render_status_section():
+def _render_status_section(alerts=None):
     st.subheader("Health Status")
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
@@ -42,6 +42,19 @@ def _render_status_section():
             st.metric("Warning", "Monitor closely")
         with c3:
             st.metric("Critical", "Immediate attention")
+
+        if alerts:
+            st.divider()
+            st.markdown("**Active Alerts:**")
+            for alert in alerts:
+                if isinstance(alert, dict):
+                    txt = alert.get("text", "")
+                    if alert.get("type") == "emergency" or "EMERGENCY" in str(txt):
+                        st.error(f"🚨 {txt}")
+                    else:
+                        st.write(f"• {txt}")
+                else:
+                    st.write(f"• {alert}")
 
 
 def _render_trends(trends):
@@ -103,14 +116,16 @@ def render_monitoring():
     metrics = data.get('metrics', {})
     trends = data.get('trends')
     medicines = data.get('medicines')
+    alerts = data.get('alerts', [])
 
     _render_overview(metrics, patient)
     st.divider()
-    _render_status_section()
+    _render_status_section(alerts)
     st.divider()
     _render_trends(trends)
     st.divider()
     _render_medicine_reminder(medicines)
+
 
 
 render_monitoring()

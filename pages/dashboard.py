@@ -1,10 +1,11 @@
-import pandas as pd
+import time
 import altair as alt
+import pandas as pd
 import streamlit as st
-from components.sidebar import render_sidebar
 from components.cards import patient_card
+from components.sidebar import render_sidebar
 from components.tables import medicine_table
-from firebase.firebase_service import get_dashboard_data
+from firebase.firebase_service import get_dashboard_data, process_esp32_data
 
 
 def _safe_number(value, default=0):
@@ -77,11 +78,12 @@ def _render_progress_indicators(health_score, spo2, heart_rate):
 def render_dashboard():
     render_sidebar()
 
-    selected_patient_id = st.session_state.get("selected_patient_id")
-    if not selected_patient_id:
-        st.info("Please select a patient from the Patient page to view dashboard data.")
-        return
+    # Automatic periodic refresh for live ESP32 telemetry updates
+    refresh_interval = 5
+    if "dashboard_last_refresh" not in st.session_state:
+        st.session_state["dashboard_last_refresh"] = time.time()
 
+    selected_patient_id = st.session_state.get("selected_patient_id")
     data = get_dashboard_data(selected_patient_id) or {}
 
     if data.get("offline"):
@@ -89,7 +91,29 @@ def render_dashboard():
 
     st.markdown("# Smart Medicine Box Dashboard", unsafe_allow_html=True)
     st.caption("Live overview of patient wellness, medication activity, and care alerts.")
+
+    # ESP32 Live Telemetry Ingestion / Simulator Expander
+    with st.expander("📡 ESP32 Device Ingestion & Testing", expanded=False):
+        st.write("Simulate or transmit live ESP32 sensor values (`heart_rate`, `spo2`, `temperature`) directly into Firebase.")
+        e_c1, e_c2, e_c3, e_c4 = st.columns(4)
+        with e_c1:
+            in_hr = st.number_input("Heart Rate (bpm)", min_value=30.0, max_value=220.0, value=75.0, step=1.0)
+        with e_c2:
+            in_spo2 = st.number_input("SpO₂ (%)", min_value=50.0, max_value=100.0, value=98.0, step=1.0)
+        with e_c3:
+            in_temp = st.number_input("Temperature (°C)", min_value=30.0, max_value=45.0, value=36.8, step=0.1)
+        with e_c4:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("📡 Send ESP32 Reading", use_container_width=True):
+                res = process_esp32_data(in_hr, in_spo2, in_temp, patient_id=selected_patient_id)
+                if res.get("success"):
+                    st.success(f"ESP32 Vitals saved to Firebase! (Reading ID: {res.get('reading_id')})")
+                    st.rerun()
+                else:
+                    st.error("Failed to transmit ESP32 reading.")
+
     st.markdown("<div style='margin-bottom: 0.5rem;'></div>", unsafe_allow_html=True)
+
 
     patient = data.get("patient", {}) or {}
     metrics = data.get("metrics", {}) or {}

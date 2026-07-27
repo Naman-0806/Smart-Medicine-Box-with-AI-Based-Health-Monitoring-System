@@ -1,14 +1,15 @@
 import streamlit as st
 from components.sidebar import render_sidebar
-from src.data import get_all_dummy_data
-from src.ui import set_theme
-from src.ui import apply_theme_styles
+from firebase.firebase_service import get_patient_by_id, get_patient_data
+from src.ui import set_theme, apply_theme_styles
 
 
 def render_settings():
-    data = get_all_dummy_data()
     render_sidebar()
     apply_theme_styles()
+
+    selected_patient_id = st.session_state.get("selected_patient_id")
+    patient = get_patient_by_id(selected_patient_id) or get_patient_data()
 
     st.markdown("# Settings")
     st.subheader("Theme")
@@ -22,7 +23,6 @@ def render_settings():
     set_theme(selected_theme)
     st.session_state["theme"] = selected_theme
 
-
     st.markdown("---")
     st.subheader("Notifications")
     st.checkbox("Enable notifications", value=True)
@@ -30,8 +30,10 @@ def render_settings():
 
     st.markdown("---")
     st.subheader("Device Settings")
-    st.markdown(f"- Device ID: {data['patient'].get('patient_id')}")
+    st.markdown(f"- Connected Patient: **{patient.get('name', 'N/A')}**")
+    st.markdown(f"- Patient / Box ID: `{patient.get('patient_id') or patient.get('id') or 'N/A'}`")
     st.button("Reconnect Device")
 
 
 render_settings()
+
