@@ -1,9 +1,10 @@
 import time
 import streamlit as st
-from firebase.firebase_service import get_dashboard_data
-from components.sidebar import render_sidebar
 from components.charts import heart_rate_chart, spo2_chart, temperature_chart
+from components.sidebar import render_sidebar
+from firebase.firebase_service import get_dashboard_data
 from src.ui import apply_theme_styles
+
 
 def _render_overview(metrics, patient):
     st.subheader("Live Health Overview")
@@ -27,7 +28,7 @@ def _render_overview(metrics, patient):
         st.divider()
         c7, c8 = st.columns(2)
         with c7:
-            st.metric("Device Status", patient.get('device_status', 'N/A'))
+            st.metric("Device Status", patient.get('device_status', 'Connected'))
         with c8:
             st.metric("Last Sync Time", patient.get('last_sync', 'N/A'))
 
@@ -77,10 +78,10 @@ def _render_medicine_reminder(medicines):
     with st.container(border=True):
         if hasattr(medicines, 'empty'):
             if medicines.empty:
-                st.markdown("No medicine data available.")
+                st.markdown("No medicine schedule data available.")
                 return
         elif not medicines:
-            st.markdown("No medicine data available.")
+            st.markdown("No medicine schedule data available.")
             return
 
         next_medicine = medicines.iloc[0] if hasattr(medicines, 'iloc') else medicines[0]
@@ -92,26 +93,36 @@ def _render_medicine_reminder(medicines):
 
 
 def render_monitoring():
-    refresh_interval = 5
+    render_sidebar()
+    apply_theme_styles()
+
+    st.markdown("# 🩺 Health Monitoring")
+    st.caption("Real-time vitals and telemetry tracking for your selected patient.")
+    st.divider()
+
+    is_logged_in = st.session_state.get("is_logged_in", False)
+    owner_uid = st.session_state.get("owner_uid")
+
+    if not is_logged_in or not owner_uid:
+        st.warning("⚠️ Please log in or sign up in the sidebar to view health monitoring telemetry.")
+        return
+
     selected_patient_id = st.session_state.get("selected_patient_id")
-    if "monitoring_data" not in st.session_state:
-        st.session_state["monitoring_data"] = get_dashboard_data(selected_patient_id)
+    refresh_interval = 5
 
     if "monitoring_last_refresh" not in st.session_state:
         st.session_state["monitoring_last_refresh"] = time.time()
 
     now = time.time()
-    if now - st.session_state["monitoring_last_refresh"] >= refresh_interval:
-        st.session_state["monitoring_data"] = get_dashboard_data(selected_patient_id)
+    if "monitoring_data" not in st.session_state or (now - st.session_state["monitoring_last_refresh"] >= refresh_interval):
+        st.session_state["monitoring_data"] = get_dashboard_data(selected_patient_id, owner_uid=owner_uid)
         st.session_state["monitoring_last_refresh"] = now
 
-    render_sidebar()
+    data = st.session_state.get("monitoring_data", {})
+    if data.get("no_patients") or not data.get("patient"):
+        st.info("⚠️ No registered patients found. Please register a patient first.")
+        return
 
-    st.markdown("# Health Monitoring")
-    apply_theme_styles()
-    st.caption("Real-time vitals and reminders in a cleaner, more scannable layout.")
-    st.divider()
-    data = st.session_state["monitoring_data"]
     patient = data.get('patient', {})
     metrics = data.get('metrics', {})
     trends = data.get('trends')
@@ -125,7 +136,6 @@ def render_monitoring():
     _render_trends(trends)
     st.divider()
     _render_medicine_reminder(medicines)
-
 
 
 render_monitoring()

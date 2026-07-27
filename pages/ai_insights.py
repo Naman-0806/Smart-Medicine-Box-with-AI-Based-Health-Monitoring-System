@@ -1,7 +1,6 @@
 import streamlit as st
 from components.sidebar import render_sidebar
 from firebase.firebase_service import get_dashboard_data
-from src.data import get_all_dummy_data
 from src.ui import apply_theme_styles
 
 
@@ -43,7 +42,7 @@ def _calculate_ai_insights(metrics, medicines):
                     missed_count += 1
 
     total_past = taken_count + missed_count
-    adherence_pct = int(round((taken_count / total_past) * 100)) if total_past > 0 else 90
+    adherence_pct = int(round((taken_count / total_past) * 100)) if total_past > 0 else 100
 
     base_score = 100
     if hr < 60 or hr > 100:
@@ -58,43 +57,26 @@ def _calculate_ai_insights(metrics, medicines):
     health_score = max(0, min(100, int(base_score)))
     if metrics.get("health_score") is not None:
         try:
-            health_score = int(metrics.get("health_score"))
+            health_score = int(float(metrics.get("health_score")))
         except (TypeError, ValueError):
             pass
 
     if health_score >= 80:
         overall_risk = "Low"
         risk_label = "Stable"
-        summary_text = f"Your recent health pattern appears stable with good medication adherence and no immediate concern (Health Score: {health_score}/100). The system suggests continued monitoring and routine follow-up."
+        summary_text = "Patient health metrics indicate stable vital signs and high medication adherence."
     elif health_score >= 60:
-        overall_risk = "Medium"
+        overall_risk = "Moderate"
         risk_label = "Monitor"
-        summary_text = f"Your recent health pattern shows moderate activity (Health Score: {health_score}/100). Some vitals or medication reminders require closer monitoring."
+        summary_text = "Patient health metrics indicate moderate fluctuations. Regular monitoring is recommended."
     else:
         overall_risk = "High"
-        risk_label = "Attention Needed"
-        summary_text = f"Your recent health indicators require attention (Health Score: {health_score}/100). Caregiver review and vital checkups are advised."
+        risk_label = "Critical"
+        summary_text = "Attention required. Vital signs or medication adherence require immediate review."
 
-    if 60 <= hr <= 100:
-        heart_risk = "Low Risk"
-    elif 50 <= hr < 60 or 100 < hr <= 110:
-        heart_risk = "Medium Risk"
-    else:
-        heart_risk = "High Risk"
-
-    if spo2 >= 95:
-        oxygen_status = "Normal"
-    elif spo2 >= 90:
-        oxygen_status = "Warning"
-    else:
-        oxygen_status = "Critical"
-
-    if 36.1 <= temp <= 37.5:
-        temp_status = "Normal"
-    elif temp > 37.5:
-        temp_status = "Fever"
-    else:
-        temp_status = "Low"
+    heart_risk = "Normal" if 60 <= hr <= 100 else ("High (Elevated)" if hr > 100 else "Low (Bradycardia)")
+    oxygen_status = "Optimal" if spo2 >= 95 else "Below Threshold (Low SpO2)"
+    temp_status = "Normal" if 36.0 <= temp <= 37.5 else "Abnormal (Fever/Hypothermia)"
 
     recs = []
     if missed_count > 0:
@@ -133,15 +115,26 @@ def _calculate_ai_insights(metrics, medicines):
 
 
 def render_ai():
-    apply_theme_styles() 
+    apply_theme_styles()
     render_sidebar()
 
-    st.markdown("# AI Insights")
-    st.caption("A concise summary of health status and personalized recommendations.")
+    st.markdown("# 🧠 AI Insights")
+    st.caption("A concise summary of patient health status and AI-generated care recommendations.")
     st.divider()
 
+    is_logged_in = st.session_state.get("is_logged_in", False)
+    owner_uid = st.session_state.get("owner_uid")
+
+    if not is_logged_in or not owner_uid:
+        st.warning("⚠️ Please log in or sign up in the sidebar to generate AI health insights.")
+        return
+
     selected_patient_id = st.session_state.get("selected_patient_id")
-    data = get_dashboard_data(selected_patient_id) if selected_patient_id else get_all_dummy_data()
+    data = get_dashboard_data(selected_patient_id, owner_uid=owner_uid)
+
+    if data.get("no_patients") or not data.get("patient"):
+        st.info("⚠️ No registered patients found. Please register a patient first.")
+        return
 
     metrics = data.get("metrics", {})
     medicines = data.get("medicines")

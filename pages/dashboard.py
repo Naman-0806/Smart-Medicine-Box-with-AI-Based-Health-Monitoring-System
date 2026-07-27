@@ -78,19 +78,32 @@ def _render_progress_indicators(health_score, spo2, heart_rate):
 def render_dashboard():
     render_sidebar()
 
-    # Automatic periodic refresh for live ESP32 telemetry updates
-    refresh_interval = 5
-    if "dashboard_last_refresh" not in st.session_state:
-        st.session_state["dashboard_last_refresh"] = time.time()
+    st.markdown("# Smart Medicine Box Dashboard", unsafe_allow_html=True)
+    st.caption("Live overview of patient wellness, medication activity, and care alerts.")
 
+    is_logged_in = st.session_state.get("is_logged_in", False)
+    owner_uid = st.session_state.get("owner_uid")
+
+    if not is_logged_in or not owner_uid:
+        st.warning("⚠️ Please log in or sign up in the sidebar to view your patient dashboard.")
+        return
+
+    # Fetch dashboard data scoped to owner_uid
     selected_patient_id = st.session_state.get("selected_patient_id")
-    data = get_dashboard_data(selected_patient_id) or {}
+    data = get_dashboard_data(selected_patient_id, owner_uid=owner_uid) or {}
+
+    if data.get("no_patients") or not data.get("patient"):
+        st.info("⚠️ No patients found. Please register a patient.")
+        st.markdown("""
+        <div style='padding:20px; text-align:center;'>
+            <p>You currently do not have any registered patients under your account.</p>
+            <p>Go to the <b>Patient</b> tab in the sidebar to register a patient.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        return
 
     if data.get("offline"):
         st.warning("Running in Offline Mode")
-
-    st.markdown("# Smart Medicine Box Dashboard", unsafe_allow_html=True)
-    st.caption("Live overview of patient wellness, medication activity, and care alerts.")
 
     # ESP32 Live Telemetry Ingestion / Simulator Expander
     with st.expander("📡 ESP32 Device Ingestion & Testing", expanded=False):
@@ -114,7 +127,6 @@ def render_dashboard():
 
     st.markdown("<div style='margin-bottom: 0.5rem;'></div>", unsafe_allow_html=True)
 
-
     patient = data.get("patient", {}) or {}
     metrics = data.get("metrics", {}) or {}
     alerts = _normalize_collection(data.get("alerts", []), [])
@@ -132,11 +144,14 @@ def render_dashboard():
         with st.container(border=True):
             st.markdown("<div class='section-title'>Recent Alerts</div>", unsafe_allow_html=True)
             st.markdown("<div style='margin-bottom: 0.45rem;'></div>", unsafe_allow_html=True)
-            for alert in alerts:
-                if isinstance(alert, dict):
-                    st.write(f"• {alert.get('text', '')}")
-                else:
-                    st.write(f"• {alert}")
+            if alerts:
+                for alert in alerts:
+                    if isinstance(alert, dict):
+                        st.write(f"• {alert.get('text', '')}")
+                    else:
+                        st.write(f"• {alert}")
+            else:
+                st.caption("No emergency alerts recorded.")
 
     with right_col:
         trend_df = pd.DataFrame(
