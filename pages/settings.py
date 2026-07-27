@@ -1,6 +1,6 @@
 import streamlit as st
 from components.sidebar import render_sidebar
-from firebase.firebase_service import get_patient_by_id, get_patient_data
+from firebase.firebase_service import get_patient_by_id
 from src.ui import set_theme, apply_theme_styles
 
 
@@ -13,7 +13,7 @@ def render_settings():
     apply_theme_styles()
 
     selected_patient_id = st.session_state.get("selected_patient_id")
-    patient = get_patient_by_id(selected_patient_id) or get_patient_data()
+    patient = get_patient_by_id(selected_patient_id) or {}
 
     st.markdown("# Settings")
     st.subheader("Theme")
