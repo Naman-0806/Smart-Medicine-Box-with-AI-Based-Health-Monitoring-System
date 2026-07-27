@@ -1,14 +1,13 @@
 import streamlit as st
 from components.sidebar import render_sidebar
-
+from firebase.auth_service import require_auth
 
 st.set_page_config(page_title="Smart Medicine Box Dashboard", layout="wide")
 
 
 def main():
-    st.session_state.setdefault("current_page", "Home")
     render_sidebar()
-    st.sidebar.radio("", ["Dashboard", "Patient", "Health Monitoring", "AI Insights", "Reports", "Settings"], key="current_page")
+    require_auth()
 
     st.markdown("# Smart Medicine Box with AI-Based Health Monitoring System")
     st.markdown("")
@@ -37,13 +36,12 @@ def main():
     st.markdown("## Technology Stack")
     st.markdown("- Streamlit")
     st.markdown("- Python")
-    st.markdown("- Firebase")
-    st.markdown("- ESP32")
-    st.markdown("- AI/ML")
-    st.markdown("- IoT Sensors")
+    st.markdown("- Firebase Auth & Firestore")
+    st.markdown("- ESP32 IoT Sensors")
+    st.markdown("- AI/ML Analytics")
 
     st.markdown("---")
-    st.caption("Select a module from the sidebar to begin.")
+    st.caption("Select a module from the sidebar navigation to begin.")
 
 
 if __name__ == "__main__":

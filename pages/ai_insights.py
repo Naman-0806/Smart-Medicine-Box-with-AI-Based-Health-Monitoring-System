@@ -114,20 +114,19 @@ def _calculate_ai_insights(metrics, medicines):
     }
 
 
+from firebase.auth_service import require_auth
+
+
 def render_ai():
     apply_theme_styles()
     render_sidebar()
+    require_auth()
 
     st.markdown("# 🧠 AI Insights")
     st.caption("A concise summary of patient health status and AI-generated care recommendations.")
     st.divider()
 
-    is_logged_in = st.session_state.get("is_logged_in", False)
-    owner_uid = st.session_state.get("owner_uid")
-
-    if not is_logged_in or not owner_uid:
-        st.warning("⚠️ Please log in or sign up in the sidebar to generate AI health insights.")
-        return
+    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
 
     selected_patient_id = st.session_state.get("selected_patient_id")
     data = get_dashboard_data(selected_patient_id, owner_uid=owner_uid)

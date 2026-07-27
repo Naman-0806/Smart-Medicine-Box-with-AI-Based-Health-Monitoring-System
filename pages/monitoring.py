@@ -2,6 +2,7 @@ import time
 import streamlit as st
 from components.charts import heart_rate_chart, spo2_chart, temperature_chart
 from components.sidebar import render_sidebar
+from firebase.auth_service import require_auth
 from firebase.firebase_service import get_dashboard_data
 from src.ui import apply_theme_styles
 
@@ -9,21 +10,28 @@ from src.ui import apply_theme_styles
 def _render_overview(metrics, patient):
     st.subheader("Live Health Overview")
     with st.container(border=True):
+        hr_val = f"{metrics.get('heart_rate')} bpm" if metrics.get('heart_rate') is not None else "N/A"
+        spo2_val = f"{metrics.get('spo2')} %" if metrics.get('spo2') is not None else "N/A"
+        temp_val = f"{metrics.get('temperature')} °C" if metrics.get('temperature') is not None else "N/A"
+        bp_val = metrics.get('blood_pressure') or "N/A"
+        resp_val = metrics.get('respiratory_rate') or "N/A"
+        score_val = metrics.get('health_score') if metrics.get('health_score') is not None else "N/A"
+
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.metric("Heart Rate", f"{metrics.get('heart_rate', 'N/A')} bpm")
+            st.metric("Heart Rate", hr_val)
         with c2:
-            st.metric("SpO₂", f"{metrics.get('spo2', 'N/A')} %")
+            st.metric("SpO₂", spo2_val)
         with c3:
-            st.metric("Body Temperature", f"{metrics.get('temperature', 'N/A')} °C")
+            st.metric("Body Temperature", temp_val)
 
         c4, c5, c6 = st.columns(3)
         with c4:
-            st.metric("Blood Pressure", metrics.get("blood_pressure", "N/A"))
+            st.metric("Blood Pressure", bp_val)
         with c5:
-            st.metric("Respiratory Rate", metrics.get("respiratory_rate", "N/A"))
+            st.metric("Respiratory Rate", resp_val)
         with c6:
-            st.metric("Health Score", metrics.get("health_score", "N/A"))
+            st.metric("Health Score", score_val)
 
         st.divider()
         c7, c8 = st.columns(2)
@@ -61,6 +69,10 @@ def _render_status_section(alerts=None):
 def _render_trends(trends):
     st.subheader("Health Trend")
     with st.container(border=True):
+        if trends is None or (hasattr(trends, 'empty') and trends.empty):
+            st.info("No health readings recorded yet for this patient.")
+            return
+
         c1, c2, c3 = st.columns(3)
         with c1:
             st.markdown("**Heart Rate**")
@@ -94,21 +106,20 @@ def _render_medicine_reminder(medicines):
 
 def render_monitoring():
     render_sidebar()
+    require_auth()
     apply_theme_styles()
 
     st.markdown("# 🩺 Health Monitoring")
     st.caption("Real-time vitals and telemetry tracking for your selected patient.")
     st.divider()
 
-    is_logged_in = st.session_state.get("is_logged_in", False)
-    owner_uid = st.session_state.get("owner_uid")
-
-    if not is_logged_in or not owner_uid:
-        st.warning("⚠️ Please log in or sign up in the sidebar to view health monitoring telemetry.")
-        return
-
+    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
     selected_patient_id = st.session_state.get("selected_patient_id")
     refresh_interval = 5
+
+    if not selected_patient_id:
+        st.info("⚠️ No patient selected. Please select or register a patient.")
+        return
 
     if "monitoring_last_refresh" not in st.session_state:
         st.session_state["monitoring_last_refresh"] = time.time()

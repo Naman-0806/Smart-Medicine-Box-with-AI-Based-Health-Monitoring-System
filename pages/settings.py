@@ -4,8 +4,12 @@ from firebase.firebase_service import get_patient_by_id, get_patient_data
 from src.ui import set_theme, apply_theme_styles
 
 
+from firebase.auth_service import require_auth
+
+
 def render_settings():
     render_sidebar()
+    require_auth()
     apply_theme_styles()
 
     selected_patient_id = st.session_state.get("selected_patient_id")

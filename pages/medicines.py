@@ -3,7 +3,6 @@ import streamlit as st
 from components.sidebar import render_sidebar
 from components.tables import medicine_table
 from firebase.firebase_service import delete_patient_medicine, get_medicine_schedule, save_patient_medicine
-from src.data import get_all_dummy_data
 from src.ui import apply_theme_styles
 
 
@@ -24,20 +23,19 @@ def _get_status_options(medicine_df):
     return ["All"] + statuses
 
 
+from firebase.auth_service import require_auth
+
+
 def render_medicines():
     render_sidebar()
+    require_auth()
     apply_theme_styles()
 
     st.markdown("# 💊 Medicine Management")
     st.caption("Manage medication schedules stored in Firebase under `patients/{patientId}/medicines`.")
     st.divider()
 
-    is_logged_in = st.session_state.get("is_logged_in", False)
-    owner_uid = st.session_state.get("owner_uid")
-
-    if not is_logged_in or not owner_uid:
-        st.warning("⚠️ Please log in or sign up in the sidebar to manage your patient's medication schedule.")
-        return
+    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
 
     selected_patient_id = st.session_state.get("selected_patient_id")
     if selected_patient_id:

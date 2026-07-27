@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Tuple
 import streamlit as st
 
 from firebase.config import get_firebase_auth, get_firestore_client
+from src.ui import apply_theme_styles
 
 
 def hash_password(password: str, salt: Optional[bytes] = None) -> str:
@@ -106,7 +107,6 @@ def signup_user(
         "full_name": full_name_clean or email_clean.split("@")[0],
         "phone_number": phone_clean,
         "password_hash": pwd_hash,
-        "created_at": st.session_state.get("now_iso") or ""
     }
 
     if client:
@@ -115,10 +115,11 @@ def signup_user(
         except Exception:
             pass
 
-    # Auto-login newly created user
+    # Store logged-in user UID in Streamlit session_state
     st.session_state["is_logged_in"] = True
-    st.session_state["auth_user"] = user_data
+    st.session_state["user_uid"] = uid
     st.session_state["owner_uid"] = uid
+    st.session_state["auth_user"] = user_data
 
     return True, "Account created successfully! Welcome."
 
@@ -175,7 +176,6 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
         if not verify_password(stored_hash, password):
             return False, "Incorrect password. Please try again."
     else:
-        # If created via Firebase Auth SDK directly without local hash, update hash upon first login
         new_hash = hash_password(password)
         user_data["password_hash"] = new_hash
         if client and target_uid:
@@ -185,9 +185,12 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
                 pass
 
     uid = user_data.get("uid") or target_uid or f"usr-{uuid.uuid4().hex[:12]}"
+    
+    # Store logged-in user UID in Streamlit session_state
     st.session_state["is_logged_in"] = True
-    st.session_state["auth_user"] = user_data
+    st.session_state["user_uid"] = uid
     st.session_state["owner_uid"] = uid
+    st.session_state["auth_user"] = user_data
 
     return True, "Login successful!"
 
@@ -196,8 +199,9 @@ def logout_user() -> None:
     """Log out the current user and clear session state."""
     for key in [
         "is_logged_in",
-        "auth_user",
+        "user_uid",
         "owner_uid",
+        "auth_user",
         "selected_patient_id",
         "patient_registration_data",
         "registration_complete",
@@ -208,3 +212,65 @@ def logout_user() -> None:
         "dashboard_last_refresh",
     ]:
         st.session_state.pop(key, None)
+
+
+def render_login_page():
+    """Render the full Login & Signup page interface."""
+    apply_theme_styles()
+
+    st.markdown("# 🔐 Smart Medicine Box Authentication")
+    st.caption("Please log in or create an account to access your smart medicine dashboard.")
+    st.divider()
+
+    col_center, _ = st.columns([2, 1])
+    with col_center:
+        tab_login, tab_signup = st.tabs(["🔑 Log In", "📝 Create Account (Sign Up)"])
+
+        with tab_login:
+            st.subheader("Login to your Account")
+            with st.form("login_form_main"):
+                login_id = st.text_input("Email Address or Phone", placeholder="user@example.com")
+                login_pwd = st.text_input("Password", type="password", placeholder="••••••••")
+                submitted_login = st.form_submit_button("Log In", type="primary")
+
+                if submitted_login:
+                    success, msg = login_user(login_id, login_pwd)
+                    if success:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+        with tab_signup:
+            st.subheader("Register a New Account")
+            with st.form("signup_form_main"):
+                su_name = st.text_input("Full Name", placeholder="Jane Doe")
+                su_email = st.text_input("Email Address *", placeholder="user@example.com")
+                su_phone = st.text_input("Phone Number (Optional)", placeholder="+1234567890")
+                su_pwd = st.text_input("Password *", type="password", placeholder="Minimum 6 characters")
+                su_pwd2 = st.text_input("Confirm Password *", type="password", placeholder="Repeat password")
+                submitted_signup = st.form_submit_button("Create Account", type="primary")
+
+                if submitted_signup:
+                    success, msg = signup_user(
+                        email=su_email,
+                        password=su_pwd,
+                        confirm_password=su_pwd2,
+                        full_name=su_name,
+                        phone_number=su_phone,
+                    )
+                    if success:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+
+def require_auth():
+    """Check if user is logged in. If not, redirect to Login view and stop execution."""
+    user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+    is_logged_in = st.session_state.get("is_logged_in", False)
+
+    if not is_logged_in or not user_uid:
+        render_login_page()
+        st.stop()

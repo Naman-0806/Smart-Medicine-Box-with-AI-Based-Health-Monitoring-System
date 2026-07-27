@@ -1,25 +1,28 @@
 import pandas as pd
 import streamlit as st
 from components.sidebar import render_sidebar
-from firebase.firebase_service import get_all_patients, get_dashboard_data, get_patient_by_id
+from firebase.auth_service import require_auth
+from firebase.firebase_service import (
+    get_all_patients,
+    get_dashboard_data,
+    get_patient_by_id,
+    get_patient_reports,
+    save_patient_report,
+)
 from src.report_generator import generate_html_report, generate_pdf_report
 from src.ui import apply_theme_styles
 
 
 def render_reports():
     render_sidebar()
+    require_auth()
     apply_theme_styles()
 
     st.markdown("# 📊 Patient Health & Activity Reports")
-    st.caption("Generate and export comprehensive clinical reports using live Firebase data.")
+    st.caption("Generate, save, and export comprehensive clinical reports for your selected patient.")
     st.divider()
 
-    is_logged_in = st.session_state.get("is_logged_in", False)
-    owner_uid = st.session_state.get("owner_uid")
-
-    if not is_logged_in or not owner_uid:
-        st.warning("⚠️ Please log in or sign up in the sidebar to generate reports for your patients.")
-        return
+    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
 
     # Patient Selector Section scoped to owner_uid
     all_patients = get_all_patients(owner_uid=owner_uid)
@@ -57,7 +60,7 @@ def render_reports():
         if st.button("🔄 Refresh Data", use_container_width=True):
             st.rerun()
 
-    # Fetch live Firebase data for selected patient
+    # Fetch live Firebase data strictly for selected patient
     data = get_dashboard_data(selected_patient_id, owner_uid=owner_uid)
     patient = data.get("patient", {})
     metrics = data.get("metrics", {})
@@ -66,7 +69,7 @@ def render_reports():
     alerts = data.get("alerts", [])
     ai_recs = data.get("ai", [])
 
-    st.markdown("### 👤 Patient Overview")
+    st.markdown("### 👤 Selected Patient Overview")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Patient Name", patient.get("name") or patient.get("full_name") or "N/A")
@@ -79,14 +82,20 @@ def render_reports():
 
     st.divider()
 
-    # Preview Tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["❤️ Vitals & Metrics", "💊 Medication Schedule", "🚨 Alerts & AI Recommendations", "📈 Health Trends"])
+    # Tabs
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "❤️ Vitals & Metrics",
+        "💊 Medication Schedule",
+        "🚨 Alerts & AI Recommendations",
+        "📈 Health Trends",
+        "📜 Saved Reports History"
+    ])
 
     with tab1:
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Heart Rate", f"{metrics.get('heart_rate', 'N/A')} bpm")
-        c2.metric("SpO₂ Level", f"{metrics.get('spo2', 'N/A')} %")
-        c3.metric("Body Temperature", f"{metrics.get('temperature', 'N/A')} °C")
+        c1.metric("Heart Rate", f"{metrics.get('heart_rate', 'N/A')} bpm" if metrics.get('heart_rate') is not None else "N/A")
+        c2.metric("SpO₂ Level", f"{metrics.get('spo2', 'N/A')} %" if metrics.get('spo2') is not None else "N/A")
+        c3.metric("Body Temperature", f"{metrics.get('temperature', 'N/A')} °C" if metrics.get('temperature') is not None else "N/A")
         c4.metric("Blood Pressure", f"{metrics.get('blood_pressure', 'N/A')}")
 
     with tab2:
@@ -121,31 +130,63 @@ def render_reports():
         else:
             st.info("No historical health trends available.")
 
+    with tab5:
+        st.subheader("📜 Saved Reports for this Patient")
+        saved_reports = get_patient_reports(selected_patient_id)
+        if saved_reports:
+            rpt_rows = []
+            for r in saved_reports:
+                rpt_rows.append({
+                    "Report ID": r.get("id") or r.get("report_id"),
+                    "Type": r.get("report_type", "PDF"),
+                    "File Name": r.get("file_name", ""),
+                    "Health Score": r.get("health_score", "N/A"),
+                    "Generated At": r.get("created_at", ""),
+                })
+            st.dataframe(pd.DataFrame(rpt_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("No saved reports found under subcollection `patients/{patientId}/reports` for this patient.")
+
     st.divider()
-    st.markdown("### 📥 Download & Export Report")
+    st.markdown("### 📥 Download & Save Patient Report")
+
+    p_id_str = patient.get("patient_id") or selected_patient_id or "patient"
+    pdf_bytes = generate_pdf_report(patient, metrics, medicines, alerts, ai_recs, trends)
+    html_str = generate_html_report(patient, metrics, medicines, alerts, ai_recs, trends)
 
     exp_col1, exp_col2 = st.columns(2)
     with exp_col1:
-        pdf_bytes = generate_pdf_report(patient, metrics, medicines, alerts, ai_recs, trends)
-        p_id_str = patient.get("patient_id") or selected_patient_id or "patient"
-        st.download_button(
+        if st.download_button(
             label="📄 Download PDF Clinical Report",
             data=pdf_bytes,
             file_name=f"patient_report_{p_id_str}.pdf",
             mime="application/pdf",
             use_container_width=True,
             type="primary",
-        )
+            key="dl_pdf_btn",
+        ):
+            save_patient_report(selected_patient_id, {
+                "report_type": "PDF",
+                "file_name": f"patient_report_{p_id_str}.pdf",
+                "health_score": metrics.get("health_score"),
+                "generated_by": owner_uid,
+            })
 
     with exp_col2:
-        html_str = generate_html_report(patient, metrics, medicines, alerts, ai_recs, trends)
-        st.download_button(
+        if st.download_button(
             label="🌐 Download HTML Report",
             data=html_str,
             file_name=f"patient_report_{p_id_str}.html",
             mime="text/html",
             use_container_width=True,
-        )
+            key="dl_html_btn",
+        ):
+            save_patient_report(selected_patient_id, {
+                "report_type": "HTML",
+                "file_name": f"patient_report_{p_id_str}.html",
+                "health_score": metrics.get("health_score"),
+                "generated_by": owner_uid,
+            })
 
 
 render_reports()

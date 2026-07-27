@@ -5,6 +5,7 @@ import streamlit as st
 from components.cards import patient_card
 from components.sidebar import render_sidebar
 from components.tables import medicine_table
+from firebase.auth_service import require_auth
 from firebase.firebase_service import get_dashboard_data, process_esp32_data
 
 
@@ -77,16 +78,12 @@ def _render_progress_indicators(health_score, spo2, heart_rate):
 
 def render_dashboard():
     render_sidebar()
+    require_auth()
 
     st.markdown("# Smart Medicine Box Dashboard", unsafe_allow_html=True)
     st.caption("Live overview of patient wellness, medication activity, and care alerts.")
 
-    is_logged_in = st.session_state.get("is_logged_in", False)
-    owner_uid = st.session_state.get("owner_uid")
-
-    if not is_logged_in or not owner_uid:
-        st.warning("⚠️ Please log in or sign up in the sidebar to view your patient dashboard.")
-        return
+    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
 
     # Fetch dashboard data scoped to owner_uid
     selected_patient_id = st.session_state.get("selected_patient_id")
@@ -97,7 +94,7 @@ def render_dashboard():
         st.markdown("""
         <div style='padding:20px; text-align:center;'>
             <p>You currently do not have any registered patients under your account.</p>
-            <p>Go to the <b>Patient</b> tab in the sidebar to register a patient.</p>
+            <p>Go to the <b>Patient Management</b> tab in the sidebar to register a patient.</p>
         </div>
         """, unsafe_allow_html=True)
         return
@@ -131,11 +128,12 @@ def render_dashboard():
     metrics = data.get("metrics", {}) or {}
     alerts = _normalize_collection(data.get("alerts", []), [])
     medicines = _normalize_collection(data.get("medicines", []), [])
+    trends_df = data.get("trends")
 
-    heart_rate = _safe_number(metrics.get("heart_rate", 72), 72)
-    spo2 = _safe_number(metrics.get("spo2", 97), 97)
-    temperature = _safe_number(metrics.get("temperature", 36.8), 36.8)
-    health_score = _safe_number(metrics.get("health_score", 82), 82)
+    heart_rate = _safe_number(metrics.get("heart_rate"), 0)
+    spo2 = _safe_number(metrics.get("spo2"), 0)
+    temperature = _safe_number(metrics.get("temperature"), 0)
+    health_score = _safe_number(metrics.get("health_score"), 0)
 
     left_col, right_col = st.columns([1.08, 1.92], gap="large")
     with left_col:
@@ -154,26 +152,23 @@ def render_dashboard():
                 st.caption("No emergency alerts recorded.")
 
     with right_col:
-        trend_df = pd.DataFrame(
-            {
-                "Period": ["Mon", "Tue", "Wed", "Thu", "Fri"],
-                "Heart Rate": [heart_rate - 2, heart_rate - 1, heart_rate, heart_rate + 1, heart_rate + 2],
-                "Health Score": [health_score - 3, health_score - 1, health_score, health_score + 1, health_score + 2],
-            }
-        )
-
-        line_chart = (
-            alt.Chart(trend_df)
-            .mark_line(point=True, strokeWidth=3, color="#2563eb")
-            .encode(
-                x=alt.X("Period", title=""),
-                y=alt.Y("Heart Rate", title="BPM"),
-                tooltip=["Period", "Heart Rate"],
+        if isinstance(trends_df, pd.DataFrame) and not trends_df.empty:
+            line_chart = (
+                alt.Chart(trends_df)
+                .mark_line(point=True, strokeWidth=3, color="#2563eb")
+                .encode(
+                    x=alt.X("time", title="Time"),
+                    y=alt.Y("heart_rate", title="Heart Rate (BPM)"),
+                    tooltip=["time", "heart_rate", "spo2", "temperature"],
+                )
+                .configure_view(fill='transparent')
+                .properties(height=220)
             )
-            .configure_view(fill='transparent')
-            .properties(height=220)
-        )
-        _render_chart_card("Vital Trend", line_chart)
+            _render_chart_card("Vital Trend", line_chart)
+        else:
+            with st.container(border=True):
+                st.markdown("<div class='section-title'>Vital Trend</div>", unsafe_allow_html=True)
+                st.caption("No vital telemetry readings recorded yet for this patient.")
 
         st.write("")
         col_a, col_b = st.columns([1, 1], gap="small")
@@ -200,8 +195,8 @@ def render_dashboard():
         with col_b:
             pie_df = pd.DataFrame(
                 {
-                    "Category": ["Adherence", "Alerts", "Medicines"],
-                    "Count": [max(1, int(health_score)), max(1, len(alerts)), max(1, len(medicines))],
+                    "Category": ["Health Score", "Alerts", "Medicines"],
+                    "Count": [int(health_score), len(alerts), len(medicines)],
                 }
             )
             pie_chart = (
@@ -218,24 +213,23 @@ def render_dashboard():
             _render_chart_card("Care Distribution", pie_chart)
 
         st.write("")
-        area_df = pd.DataFrame(
-            {
-                "Day": ["Mon", "Tue", "Wed", "Thu", "Fri"],
-                "Score": [health_score - 4, health_score - 2, health_score, health_score + 1, health_score + 2],
-            }
-        )
-        area_chart = (
-            alt.Chart(area_df)
-            .mark_area(line=True, color="#93c5fd", opacity=0.45)
-            .encode(
-                x=alt.X("Day", title=""),
-                y=alt.Y("Score", title="Score"),
-                tooltip=["Day", "Score"],
+        if isinstance(trends_df, pd.DataFrame) and not trends_df.empty:
+            area_chart = (
+                alt.Chart(trends_df)
+                .mark_area(line=True, color="#93c5fd", opacity=0.45)
+                .encode(
+                    x=alt.X("time", title="Time"),
+                    y=alt.Y("health_score", title="Score"),
+                    tooltip=["time", "health_score"],
+                )
+                .configure_view(fill='transparent')
+                .properties(height=220)
             )
-            .configure_view(fill='transparent')
-            .properties(height=220)
-        )
-        _render_chart_card("Wellness Area", area_chart)
+            _render_chart_card("Wellness Area", area_chart)
+        else:
+            with st.container(border=True):
+                st.markdown("<div class='section-title'>Wellness Area</div>", unsafe_allow_html=True)
+                st.caption("No wellness history recorded yet for this patient.")
 
         st.write("")
         _render_progress_indicators(health_score, spo2, heart_rate)

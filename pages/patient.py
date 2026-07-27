@@ -86,6 +86,8 @@ def _render_patient_list(owner_uid):
         def_idx = 0
         if current_selected in patient_ids:
             def_idx = patient_ids.index(current_selected)
+        elif patient_ids:
+            st.session_state["selected_patient_id"] = patient_ids[0]
 
         selected_id = st.selectbox(
             "Select Active Patient",
@@ -101,6 +103,7 @@ def _render_patient_list(owner_uid):
 
         st.caption(f"Active Patient ID: `{selected_id}`")
     else:
+        st.session_state["selected_patient_id"] = None
         st.info("No registered patients found for your account. Please register a patient below.")
 
     st.markdown("</div>", unsafe_allow_html=True)
@@ -125,16 +128,22 @@ def _render_profile_view_and_update(selected_patient_id, owner_uid):
             st.markdown(f"**Name:** {patient_data.get('name') or patient_data.get('full_name') or '-'}")
             st.markdown(f"**Age:** {patient_data.get('age', '-')}")
             st.markdown(f"**Gender:** {patient_data.get('gender', '-')}")
+            st.markdown(f"**Height:** {patient_data.get('height', '-')} cm")
+            st.markdown(f"**Weight:** {patient_data.get('weight', '-')} kg")
         with col_b:
             st.markdown(f"**Blood Group:** {patient_data.get('blood_group', '-')}")
             st.markdown(f"**Phone:** {patient_data.get('phone_number', '-')}")
             st.markdown(f"**Email:** {patient_data.get('email', '-')}")
+            st.markdown(f"**Emergency Contact:** {patient_data.get('emergency_name', '-')} ({patient_data.get('emergency_phone', '-')})")
             st.markdown(f"**Doctor:** {patient_data.get('doctor_name', '-')}")
+            st.markdown(f"**Hospital:** {patient_data.get('hospital_name', '-')}")
         with col_c:
             st.markdown(f"**Disease/Condition:** {patient_data.get('disease') or patient_data.get('existing_diseases') or '-'}")
+            st.markdown(f"**Allergies:** {patient_data.get('allergies', '-')}")
+            st.markdown(f"**Medications:** {patient_data.get('current_medications', '-')}")
             st.markdown(f"**Device ID:** {patient_data.get('medicine_box_id', '-')}")
             st.markdown(f"**Device Serial:** {patient_data.get('device_serial_number', '-')}")
-            st.markdown(f"**Status:** {patient_data.get('device_status', 'Connected')}")
+            st.markdown(f"**Device Status:** {patient_data.get('device_status', 'Connected')}")
         st.markdown("</div>", unsafe_allow_html=True)
 
         col_act1, col_act2 = st.columns([1, 1])
@@ -147,12 +156,13 @@ def _render_profile_view_and_update(selected_patient_id, owner_uid):
                 st.session_state["confirm_delete_patient"] = True
 
         if st.session_state.get("confirm_delete_patient"):
-            st.warning(f"⚠️ Are you sure you want to permanently delete patient **{patient_data.get('name')}** (`{selected_patient_id}`)? This action immediately removes all medicine and health records from Firebase.")
+            p_name = patient_data.get('name') or patient_data.get('full_name') or 'Selected Patient'
+            st.warning(f"⚠️ Are you sure you want to permanently delete patient **{p_name}** (`{selected_patient_id}`)? This action will immediately remove all patient data, medicine schedules, and health records from Firebase.")
             c_del1, c_del2 = st.columns(2)
             with c_del1:
-                if st.button("YES, Delete Patient", key="btn_confirm_del"):
+                if st.button("Confirm Delete Patient", key="btn_confirm_del", type="primary"):
                     if delete_patient(selected_patient_id, owner_uid=owner_uid):
-                        st.success("Patient record deleted successfully from Firebase.")
+                        st.success("Patient record deleted successfully from Firebase!")
                         st.session_state.pop("selected_patient_id", None)
                         st.session_state.pop("confirm_delete_patient", None)
                         st.rerun()
@@ -164,32 +174,51 @@ def _render_profile_view_and_update(selected_patient_id, owner_uid):
                     st.rerun()
 
     else:
-        # Edit Form
+        # Edit Form with pre-filled fields
         st.subheader("✏️ Update Patient Profile")
         with st.form("edit_patient_profile_form"):
             st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+            st.markdown("<div class='section-title'>Personal Information</div>", unsafe_allow_html=True)
             col1, col2 = st.columns(2)
             with col1:
-                e_name = st.text_input("Name *", value=patient_data.get("name") or patient_data.get("full_name") or "")
+                e_name = st.text_input("Full Name *", value=patient_data.get("name") or patient_data.get("full_name") or "")
                 e_age = st.number_input("Age", min_value=0, max_value=120, value=int(patient_data.get("age") or 0))
-                e_gender = st.selectbox("Gender", ["Male", "Female", "Other"], index=["Male", "Female", "Other"].index(patient_data.get("gender")) if patient_data.get("gender") in ["Male", "Female", "Other"] else 2)
+                gender_opts = ["Male", "Female", "Other"]
+                curr_gender = patient_data.get("gender") if patient_data.get("gender") in gender_opts else "Other"
+                e_gender = st.selectbox("Gender", gender_opts, index=gender_opts.index(curr_gender))
             with col2:
                 e_blood = st.text_input("Blood Group", value=patient_data.get("blood_group") or "A+")
-                e_phone = st.text_input("Phone Number", value=patient_data.get("phone_number") or "")
-                e_email = st.text_input("Email Address", value=patient_data.get("email") or "")
+                e_height = st.number_input("Height (cm)", min_value=0, max_value=250, value=int(patient_data.get("height") or 170))
+                e_weight = st.number_input("Weight (kg)", min_value=0, max_value=300, value=int(patient_data.get("weight") or 70))
             st.markdown("</div>", unsafe_allow_html=True)
 
             st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+            st.markdown("<div class='section-title'>Contact Information</div>", unsafe_allow_html=True)
             col3, col4 = st.columns(2)
             with col3:
-                e_disease = st.text_area("Disease / Conditions", value=patient_data.get("disease") or patient_data.get("existing_diseases") or "", height=80)
-                e_allergies = st.text_area("Allergies", value=patient_data.get("allergies") or "", height=80)
+                e_phone = st.text_input("Phone Number", value=patient_data.get("phone_number") or "")
+                e_email = st.text_input("Email Address", value=patient_data.get("email") or "")
             with col4:
-                e_meds = st.text_area("Current Medications", value=patient_data.get("current_medications") or "", height=80)
-                e_doctor = st.text_input("Doctor Name", value=patient_data.get("doctor_name") or "")
+                e_em_name = st.text_input("Emergency Contact Name", value=patient_data.get("emergency_name") or "")
+                e_em_phone = st.text_input("Emergency Contact Phone", value=patient_data.get("emergency_phone") or "")
+            e_address = st.text_area("Address", value=patient_data.get("address") or "", height=80)
             st.markdown("</div>", unsafe_allow_html=True)
 
-            btn_save = st.form_submit_button("Save Changes to Firebase")
+            st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+            st.markdown("<div class='section-title'>Medical & Device Information</div>", unsafe_allow_html=True)
+            col5, col6 = st.columns(2)
+            with col5:
+                e_disease = st.text_area("Existing Diseases / Conditions", value=patient_data.get("disease") or patient_data.get("existing_diseases") or "", height=80)
+                e_allergies = st.text_area("Allergies", value=patient_data.get("allergies") or "", height=80)
+                e_meds = st.text_area("Current Medications", value=patient_data.get("current_medications") or "", height=80)
+            with col6:
+                e_doctor = st.text_input("Doctor Name", value=patient_data.get("doctor_name") or "")
+                e_hospital = st.text_input("Hospital Name", value=patient_data.get("hospital_name") or "")
+                e_box_id = st.text_input("Medicine Box ID", value=patient_data.get("medicine_box_id") or "")
+                e_dev_serial = st.text_input("Device Serial Number", value=patient_data.get("device_serial_number") or "")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            btn_save = st.form_submit_button("Save Changes to Firebase", type="primary")
             btn_cancel = st.form_submit_button("Cancel Editing")
 
             if btn_save:
@@ -199,23 +228,35 @@ def _render_profile_view_and_update(selected_patient_id, owner_uid):
                     "age": e_age,
                     "gender": e_gender,
                     "blood_group": e_blood.strip(),
+                    "height": e_height,
+                    "weight": e_weight,
                     "phone_number": e_phone.strip(),
                     "email": e_email.strip(),
+                    "address": e_address.strip(),
+                    "emergency_name": e_em_name.strip(),
+                    "emergency_phone": e_em_phone.strip(),
                     "existing_diseases": e_disease.strip(),
                     "allergies": e_allergies.strip(),
                     "current_medications": e_meds.strip(),
                     "doctor_name": e_doctor.strip(),
+                    "hospital_name": e_hospital.strip(),
+                    "medicine_box_id": e_box_id.strip(),
+                    "device_serial_number": e_dev_serial.strip(),
                 }
                 valid, msg = validate_patient_input(upd_payload)
                 if not valid:
                     st.error(msg)
                 else:
-                    if update_patient_registration(selected_patient_id, upd_payload, owner_uid=owner_uid):
-                        st.success("Patient profile updated successfully in Firebase!")
-                        st.session_state["editing_patient_profile"] = False
-                        st.rerun()
+                    is_dup, dup_msg = check_duplicate_patient(owner_uid, e_phone.strip(), e_email.strip(), e_name.strip(), exclude_patient_id=selected_patient_id)
+                    if is_dup:
+                        st.error(dup_msg)
                     else:
-                        st.error("Failed to update patient profile in Firebase.")
+                        if update_patient_registration(selected_patient_id, upd_payload, owner_uid=owner_uid):
+                            st.success("Patient profile updated successfully in Firebase!")
+                            st.session_state["editing_patient_profile"] = False
+                            st.rerun()
+                        else:
+                            st.error("Failed to update patient profile in Firebase.")
 
             if btn_cancel:
                 st.session_state["editing_patient_profile"] = False
@@ -303,14 +344,13 @@ def _render_registration_form(owner_uid):
                 "medicine_box_id": r_box_id.strip(),
                 "device_serial_number": r_dev_serial.strip(),
                 "owner_uid": owner_uid,
+                "ownerUid": owner_uid,
             }
 
-            # 1. Validation
             valid, err_msg = validate_patient_input(payload)
             if not valid:
                 st.error(err_msg)
             else:
-                # 2. Check for Duplicate Patients
                 is_dup, dup_msg = check_duplicate_patient(owner_uid, r_phone, r_email, r_name)
                 if is_dup:
                     st.error(dup_msg)
@@ -329,18 +369,17 @@ def _render_registration_form(owner_uid):
             st.rerun()
 
 
+from firebase.auth_service import require_auth
+
+
 def render_patient():
     render_sidebar()
+    require_auth()
     _apply_styles()
 
     st.markdown("# 🩺 Patient Management")
 
-    is_logged_in = st.session_state.get("is_logged_in", False)
-    owner_uid = st.session_state.get("owner_uid")
-
-    if not is_logged_in or not owner_uid:
-        st.warning("⚠️ Please log in or sign up in the sidebar to view, register, or manage your patient records.")
-        return
+    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
 
     _render_patient_list(owner_uid=owner_uid)
 
