@@ -1,33 +1,12 @@
-import hashlib
-import os
+import json
 import re
-import uuid
+from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
+import requests
 import streamlit as st
 
-from firebase.config import get_firebase_auth, get_firestore_client
+from firebase.config import get_firebase_web_api_key, get_firestore_client
 from src.ui import apply_theme_styles
-
-
-def hash_password(password: str, salt: Optional[bytes] = None) -> str:
-    """Hash password securely using PBKDF2-HMAC-SHA256 with a unique salt."""
-    if salt is None:
-        salt = os.urandom(16)
-    key = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
-    return f"{salt.hex()}:{key.hex()}"
-
-
-def verify_password(stored_hash: str, password_attempt: str) -> bool:
-    """Verify a plain-text password attempt against a stored PBKDF2 salt:hash string."""
-    if not stored_hash or ":" not in stored_hash:
-        return False
-    try:
-        salt_hex, key_hex = stored_hash.split(":")
-        salt = bytes.fromhex(salt_hex)
-        attempt_key = hashlib.pbkdf2_hmac("sha256", password_attempt.encode("utf-8"), salt, 100000)
-        return attempt_key.hex() == key_hex
-    except Exception:
-        return False
 
 
 def validate_email(email: str) -> bool:
@@ -43,6 +22,46 @@ def validate_phone(phone: str) -> bool:
     return bool(re.match(pattern, cleaned))
 
 
+def _firebase_rest_auth(endpoint: str, payload: dict) -> Tuple[bool, dict, str]:
+    """Execute Firebase Identity Toolkit REST API request."""
+    api_key = get_firebase_web_api_key()
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:{endpoint}?key={api_key}"
+
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        res_data = response.json()
+        if response.status_code == 200:
+            return True, res_data, ""
+
+        error_info = res_data.get("error", {})
+        err_msg_code = str(error_info.get("message", "")).upper()
+        return False, res_data, err_msg_code
+    except Exception as e:
+        return False, {}, str(e)
+
+
+def _map_firebase_error(err_code: str, mode: str = "login") -> str:
+    """Map Firebase Auth error string codes to clear user-facing messages."""
+    if "EMAIL_EXISTS" in err_code:
+        return "An account with this email address already exists."
+    if "INVALID_EMAIL" in err_code:
+        return "Please enter a valid email address."
+    if "WEAK_PASSWORD" in err_code:
+        return "Password must be at least 6 characters long."
+    if "EMAIL_NOT_FOUND" in err_code or "USER_NOT_FOUND" in err_code:
+        return "User account not found. Please check your credentials or sign up."
+    if "INVALID_PASSWORD" in err_code or "WRONG_PASSWORD" in err_code or "INVALID_LOGIN_CREDENTIALS" in err_code:
+        return "Incorrect password. Please try again."
+    if "USER_DISABLED" in err_code:
+        return "This user account has been disabled."
+    if "TOO_MANY_ATTEMPTS" in err_code:
+        return "Access temporarily disabled due to many failed attempts. Please try again later."
+
+    if mode == "login":
+        return "Authentication failed. Please check your email and password."
+    return "Account registration failed. Please try again."
+
+
 def signup_user(
     email: str,
     password: str,
@@ -50,7 +69,7 @@ def signup_user(
     full_name: str = "",
     phone_number: str = ""
 ) -> Tuple[bool, str]:
-    """Register a new user in Firebase Auth and Firestore `/users` collection."""
+    """Register a new user via Firebase Authentication and save user record in Firestore /users/{uid}."""
     email_clean = email.strip().lower()
     full_name_clean = full_name.strip()
     phone_clean = phone_number.strip()
@@ -70,52 +89,57 @@ def signup_user(
     if phone_clean and not validate_phone(phone_clean):
         return False, "Please enter a valid phone number (e.g. +1234567890)."
 
-    auth_mod = get_firebase_auth()
-    client = get_firestore_client()
-    firebase_uid = None
+    # Attempt Pyrebase4 if available, otherwise Identity Toolkit REST API
+    pyrebase_ok = False
+    uid = None
+    try:
+        import pyrebase
+        api_key = get_firebase_web_api_key()
+        if api_key:
+            pb_config = {
+                "apiKey": api_key,
+                "authDomain": f"{api_key}.firebaseapp.com",
+                "databaseURL": "",
+                "storageBucket": "",
+            }
+            pb_app = pyrebase.initialize_app(pb_config)
+            pb_auth = pb_app.auth()
+            user = pb_auth.create_user_with_email_and_password(email_clean, password)
+            uid = user.get("localId")
+            pyrebase_ok = True
+    except Exception:
+        pass
 
-    # Check if user already exists in Firestore `/users`
-    if client:
-        try:
-            users_ref = client.collection("users")
-            query = list(users_ref.where("email", "==", email_clean).limit(1).stream())
-            if query:
-                return False, "An account with this email already exists."
-        except Exception:
-            pass
+    if not pyrebase_ok:
+        success, res_data, err_code = _firebase_rest_auth(
+            "signUp",
+            {"email": email_clean, "password": password, "returnSecureToken": True}
+        )
+        if not success:
+            return False, _map_firebase_error(err_code, mode="signup")
+        uid = res_data.get("localId")
 
-    # Try creating user in Firebase Auth SDK
-    if auth_mod:
-        try:
-            user_record = auth_mod.create_user(
-                email=email_clean,
-                password=password,
-                display_name=full_name_clean or email_clean.split("@")[0]
-            )
-            firebase_uid = user_record.uid
-        except Exception as e:
-            err_msg = str(e).lower()
-            if "already exists" in err_msg or "email-already-in-use" in err_msg:
-                return False, "An account with this email already exists in Firebase Auth."
+    if not uid:
+        return False, "Failed to retrieve user ID from Firebase Authentication."
 
-    uid = firebase_uid or f"usr-{uuid.uuid4().hex[:12]}"
-    pwd_hash = hash_password(password)
-
+    now_iso = datetime.utcnow().isoformat()
     user_data = {
         "uid": uid,
-        "email": email_clean,
         "full_name": full_name_clean or email_clean.split("@")[0],
+        "email": email_clean,
         "phone_number": phone_clean,
-        "password_hash": pwd_hash,
+        "created_at": now_iso,
     }
 
+    # Store user profile document in Firestore at /users/{uid} using firebase_admin
+    client = get_firestore_client()
     if client:
         try:
-            client.collection("users").document(uid).set(user_data)
+            client.collection("users").document(uid).set(user_data, merge=True)
         except Exception:
             pass
 
-    # Store logged-in user UID in Streamlit session_state
+    # Store in st.session_state
     st.session_state["is_logged_in"] = True
     st.session_state["user_uid"] = uid
     st.session_state["owner_uid"] = uid
@@ -126,68 +150,68 @@ def signup_user(
 
 
 def login_user(identifier: str, password: str) -> Tuple[bool, str]:
-    """Authenticate user against Firebase Auth or Firestore `/users` using hashed credentials."""
+    """Authenticate user with email and password strictly through Firebase Authentication."""
     clean_id = identifier.strip().lower()
 
     if not clean_id or not password:
-        return False, "Please enter both identifier and password."
+        return False, "Please enter both email address and password."
 
-    auth_mod = get_firebase_auth()
+    if not validate_email(clean_id):
+        return False, "Please enter a valid email address."
+
+    # Authenticate via Pyrebase4 or Identity Toolkit REST API
+    pyrebase_ok = False
+    uid = None
+    try:
+        import pyrebase
+        api_key = get_firebase_web_api_key()
+        if api_key:
+            pb_config = {
+                "apiKey": api_key,
+                "authDomain": f"{api_key}.firebaseapp.com",
+                "databaseURL": "",
+                "storageBucket": "",
+            }
+            pb_app = pyrebase.initialize_app(pb_config)
+            pb_auth = pb_app.auth()
+            user = pb_auth.sign_in_with_email_and_password(clean_id, password)
+            uid = user.get("localId")
+            pyrebase_ok = True
+    except Exception:
+        pass
+
+    if not pyrebase_ok:
+        success, res_data, err_code = _firebase_rest_auth(
+            "signInWithPassword",
+            {"email": clean_id, "password": password, "returnSecureToken": True}
+        )
+        if not success:
+            return False, _map_firebase_error(err_code, mode="login")
+        uid = res_data.get("localId")
+
+    if not uid:
+        return False, "User account not found. Please check your credentials or sign up."
+
+    # After successful login, load user's Firestore profile from users/{uid}
     client = get_firestore_client()
-
     user_data = None
-    target_uid = None
-
-    # Search Firestore `/users` by email or phone
     if client:
         try:
-            users_ref = client.collection("users")
-            if "@" in clean_id:
-                docs = list(users_ref.where("email", "==", clean_id).limit(1).stream())
-            else:
-                docs = list(users_ref.where("phone_number", "==", clean_id).limit(1).stream())
-
-            if docs:
-                user_data = docs[0].to_dict()
-                target_uid = docs[0].id
-        except Exception:
-            pass
-
-    # Lookup via Firebase Auth if user not found in local Firestore query
-    if auth_mod and not user_data:
-        try:
-            if "@" in clean_id:
-                fb_user = auth_mod.get_user_by_email(clean_id)
-                target_uid = fb_user.uid
-                user_data = {
-                    "uid": fb_user.uid,
-                    "email": fb_user.email,
-                    "full_name": fb_user.display_name or clean_id.split("@")[0],
-                    "phone_number": fb_user.phone_number or "",
-                }
+            doc = client.collection("users").document(uid).get()
+            if doc.exists:
+                user_data = doc.to_dict()
         except Exception:
             pass
 
     if not user_data:
-        return False, "User account not found. Please check your credentials or sign up."
+        user_data = {
+            "uid": uid,
+            "full_name": clean_id.split("@")[0],
+            "email": clean_id,
+            "phone_number": "",
+        }
 
-    # Verify password
-    stored_hash = user_data.get("password_hash")
-    if stored_hash:
-        if not verify_password(stored_hash, password):
-            return False, "Incorrect password. Please try again."
-    else:
-        new_hash = hash_password(password)
-        user_data["password_hash"] = new_hash
-        if client and target_uid:
-            try:
-                client.collection("users").document(target_uid).set({"password_hash": new_hash}, merge=True)
-            except Exception:
-                pass
-
-    uid = user_data.get("uid") or target_uid or f"usr-{uuid.uuid4().hex[:12]}"
-    
-    # Store logged-in user UID in Streamlit session_state
+    # Store in st.session_state
     st.session_state["is_logged_in"] = True
     st.session_state["user_uid"] = uid
     st.session_state["owner_uid"] = uid
@@ -232,7 +256,7 @@ def render_login_page():
         with tab_login:
             st.subheader("Login to your Account")
             with st.form("login_form_main"):
-                login_id = st.text_input("Email Address or Phone", placeholder="user@example.com")
+                login_id = st.text_input("Email Address", placeholder="user@example.com")
                 login_pwd = st.text_input("Password", type="password", placeholder="••••••••")
                 submitted_login = st.form_submit_button("Log In", type="primary")
 
@@ -293,5 +317,3 @@ def require_auth():
         )
         render_login_page()
         st.stop()
-
-

@@ -59,3 +59,14 @@ def get_firebase_auth() -> Any:
         return auth
     return None
 
+
+def get_firebase_web_api_key() -> str:
+    """Return Firebase Web API Key for client REST authentication."""
+    return (
+        os.getenv("FIREBASE_WEB_API_KEY")
+        or os.getenv("FIREBASE_API_KEY")
+        or os.getenv("WEB_API_KEY")
+        or ""
+    )
+
+
