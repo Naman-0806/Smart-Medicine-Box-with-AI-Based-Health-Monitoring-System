@@ -271,7 +271,7 @@ def _render_registration_form(owner_uid):
                 "full_name": r_name.strip(),
                 "age": r_age,
                 "gender": r_gender,
-                "dob": r_dob,
+                "dob": str(r_dob) if r_dob else "",
                 "blood_group": r_blood,
                 "height": r_height,
                 "weight": r_weight,

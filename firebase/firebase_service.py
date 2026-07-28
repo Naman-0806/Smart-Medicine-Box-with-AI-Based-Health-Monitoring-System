@@ -129,6 +129,9 @@ def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[
     existing_doc = doc_ref.get() if doc_ref else None
     existing_data = existing_doc.to_dict() if (existing_doc and existing_doc.exists) else {}
 
+    raw_dob = patient_data.get("dob") or existing_data.get("dob") or ""
+    dob_str = str(raw_dob) if raw_dob else ""
+
     payload = {
         "patient_id": uid,
         "id": uid,
@@ -138,7 +141,7 @@ def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[
         "full_name": patient_data.get("full_name") or patient_data.get("name") or existing_data.get("full_name") or "",
         "age": patient_data.get("age") if patient_data.get("age") is not None else existing_data.get("age"),
         "gender": patient_data.get("gender") or existing_data.get("gender") or "Other",
-        "dob": str(patient_data.get("dob") or existing_data.get("dob") or ""),
+        "dob": dob_str,
         "blood_group": patient_data.get("blood_group") or existing_data.get("blood_group") or "A+",
         "height": patient_data.get("height") if patient_data.get("height") is not None else existing_data.get("height"),
         "weight": patient_data.get("weight") if patient_data.get("weight") is not None else existing_data.get("weight"),
@@ -165,8 +168,11 @@ def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[
     if doc_ref is not None:
         try:
             doc_ref.set(payload, merge=True)
-        except Exception:
-            pass
+            invalidate_firebase_cache()
+            return uid
+        except Exception as e:
+            print(f"[ERROR] save_patient_registration failed: {e}")
+            return None
 
     invalidate_firebase_cache()
     return uid
