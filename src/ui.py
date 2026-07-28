@@ -111,25 +111,5 @@ div[data-testid="stVerticalBlockBorderWrapper"] {{
 # ---------------- Sidebar ---------------- #
 
 def render_sidebar():
-
-    apply_theme_styles()
-
-    st.sidebar.title("🩺 Smart Medicine Box")
-
-    page = st.sidebar.radio(
-        "Navigation",
-        [
-            "Dashboard",
-            "Patient",
-            "Medicines",
-            "Health Monitoring",
-            "AI Insights",
-            "Reports",
-            "Settings",
-        ],
-    )
-
-    st.sidebar.markdown("---")
-    st.sidebar.caption("AI Based Health Monitoring")
-
-    return page
+    from components.sidebar import render_sidebar as _render_sidebar
+    return _render_sidebar()

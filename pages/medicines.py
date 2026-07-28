@@ -27,9 +27,10 @@ from firebase.auth_service import require_auth
 
 
 def render_medicines():
-    render_sidebar()
     require_auth()
+    render_sidebar()
     apply_theme_styles()
+
 
     st.markdown("# 💊 Medicine Management")
     st.caption("Manage medication schedules stored in Firebase under `patients/{patientId}/medicines`.")

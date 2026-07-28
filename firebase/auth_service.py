@@ -212,6 +212,7 @@ def logout_user() -> None:
         "dashboard_last_refresh",
     ]:
         st.session_state.pop(key, None)
+    st.rerun()
 
 
 def render_login_page():
@@ -267,10 +268,28 @@ def render_login_page():
 
 
 def require_auth():
-    """Check if user is logged in. If not, redirect to Login view and stop execution."""
+    """Check if user is logged in. If not, show ONLY authentication screen and stop execution."""
     user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
     is_logged_in = st.session_state.get("is_logged_in", False)
 
     if not is_logged_in or not user_uid:
+        st.markdown(
+            """
+            <style>
+            [data-testid="stSidebar"] {
+                display: none !important;
+            }
+            [data-testid="stSidebarNav"] {
+                display: none !important;
+            }
+            header[data-testid="stHeader"] {
+                display: none !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         render_login_page()
         st.stop()
+
+

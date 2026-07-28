@@ -77,8 +77,9 @@ def _render_progress_indicators(health_score, spo2, heart_rate):
 
 
 def render_dashboard():
-    render_sidebar()
     require_auth()
+    render_sidebar()
+
 
     st.markdown("# Smart Medicine Box Dashboard", unsafe_allow_html=True)
     st.caption("Live overview of patient wellness, medication activity, and care alerts.")

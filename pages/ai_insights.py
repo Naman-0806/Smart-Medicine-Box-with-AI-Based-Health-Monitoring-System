@@ -118,9 +118,10 @@ from firebase.auth_service import require_auth
 
 
 def render_ai():
+    require_auth()
     apply_theme_styles()
     render_sidebar()
-    require_auth()
+
 
     st.markdown("# 🧠 AI Insights")
     st.caption("A concise summary of patient health status and AI-generated care recommendations.")

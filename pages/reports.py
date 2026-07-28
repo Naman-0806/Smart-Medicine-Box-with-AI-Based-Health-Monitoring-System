@@ -14,9 +14,10 @@ from src.ui import apply_theme_styles
 
 
 def render_reports():
-    render_sidebar()
     require_auth()
+    render_sidebar()
     apply_theme_styles()
+
 
     st.markdown("# 📊 Patient Health & Activity Reports")
     st.caption("Generate, save, and export comprehensive clinical reports for your selected patient.")

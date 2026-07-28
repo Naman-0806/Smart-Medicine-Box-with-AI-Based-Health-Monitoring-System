@@ -320,9 +320,10 @@ def _render_registration_form(owner_uid):
 
 
 def render_patient():
-    render_sidebar()
     require_auth()
+    render_sidebar()
     _apply_styles()
+
 
     st.markdown("# 🩺 Patient Management")
 

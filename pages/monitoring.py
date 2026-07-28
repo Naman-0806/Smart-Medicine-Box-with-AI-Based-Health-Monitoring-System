@@ -105,9 +105,10 @@ def _render_medicine_reminder(medicines):
 
 
 def render_monitoring():
-    render_sidebar()
     require_auth()
+    render_sidebar()
     apply_theme_styles()
+
 
     st.markdown("# 🩺 Health Monitoring")
     st.caption("Real-time vitals and telemetry tracking for your selected patient.")

@@ -6,9 +6,10 @@ from src.ui import apply_theme_styles, set_theme
 
 
 def render_settings():
-    render_sidebar()
     require_auth()
+    render_sidebar()
     apply_theme_styles()
+
 
     owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
     patient = get_patient_by_id(owner_uid, owner_uid=owner_uid) or {}
