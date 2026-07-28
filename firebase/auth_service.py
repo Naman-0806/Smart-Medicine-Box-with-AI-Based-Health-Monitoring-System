@@ -93,6 +93,7 @@ def signup_user(
     pyrebase_ok = False
     uid = None
     try:
+        # pyrefly: ignore [missing-import]
         import pyrebase
         api_key = get_firebase_web_api_key()
         if api_key:
@@ -163,6 +164,7 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
     pyrebase_ok = False
     uid = None
     try:
+        # pyrefly: ignore [missing-import]
         import pyrebase
         api_key = get_firebase_web_api_key()
         if api_key:

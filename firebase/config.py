@@ -69,4 +69,14 @@ def get_firebase_web_api_key() -> str:
         or ""
     )
 
+def get_firebase_web_api_key():
+    key = (
+        os.getenv("FIREBASE_WEB_API_KEY")
+        or os.getenv("FIREBASE_API_KEY")
+        or os.getenv("WEB_API_KEY")
+        or ""
+    )
 
+    print("API KEY =", key)
+
+    return key
