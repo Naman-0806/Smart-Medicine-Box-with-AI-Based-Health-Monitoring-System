@@ -91,13 +91,8 @@ def render_dashboard():
     data = get_dashboard_data(selected_patient_id, owner_uid=owner_uid) or {}
 
     if data.get("no_patients") or not data.get("patient"):
-        st.info("⚠️ No patients found. Please register a patient.")
-        st.markdown("""
-        <div style='padding:20px; text-align:center;'>
-            <p>You currently do not have any registered patients under your account.</p>
-            <p>Go to the <b>Patient Management</b> tab in the sidebar to register a patient.</p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.warning("📝 No patient profile found. Redirecting to Patient Registration...")
+        st.switch_page("pages/patient.py")
         return
 
     if data.get("offline"):

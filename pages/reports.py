@@ -24,37 +24,17 @@ def render_reports():
     st.divider()
 
     owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+    st.session_state["selected_patient_id"] = owner_uid
 
-    # Patient Selector Section scoped to owner_uid
-    all_patients = get_all_patients(owner_uid=owner_uid)
-    patient_options = {}
+    patient = get_patient_by_id(owner_uid)
+    if not patient:
+        st.warning("📝 No patient profile registered yet. Please register your patient profile first.")
+        if st.button("📝 Register Patient Profile", type="primary", use_container_width=True):
+            st.switch_page("pages/patient.py")
+        return
 
-    if all_patients:
-        for p in all_patients:
-            p_id = p.get("patient_id") or p.get("id") or ""
-            p_name = p.get("name") or p.get("full_name") or "Unnamed Patient"
-            label = f"{p_name} ({p_id})"
-            patient_options[label] = p_id
-
-    current_selected_id = st.session_state.get("selected_patient_id")
-
-    col_pat1, col_pat2 = st.columns([2, 1])
-    with col_pat1:
-        if patient_options:
-            default_index = 0
-            option_list = list(patient_options.keys())
-            if current_selected_id:
-                for idx, lbl in enumerate(option_list):
-                    if patient_options[lbl] == current_selected_id:
-                        default_index = idx
-                        break
-
-            selected_label = st.selectbox("Select Patient for Report Generation:", option_list, index=default_index)
-            selected_patient_id = patient_options[selected_label]
-            st.session_state["selected_patient_id"] = selected_patient_id
-        else:
-            st.warning("No registered patients found under your account. Please register a patient first.")
-            return
+    selected_patient_id = owner_uid
+    st.caption(f"Patient Profile: **{patient.get('name') or patient.get('full_name')}** (ID: `{owner_uid}`)")
 
     with col_pat2:
         st.markdown("<br>", unsafe_allow_html=True)

@@ -37,20 +37,20 @@ def render_medicines():
     st.divider()
 
     owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+    st.session_state["selected_patient_id"] = owner_uid
 
-    selected_patient_id = st.session_state.get("selected_patient_id")
-    if selected_patient_id:
-        st.caption(f"Connected to patient: **{selected_patient_id}**")
-    else:
-        st.info("⚠️ No patient selected. Please select or register a patient.")
+    from firebase.firebase_service import get_patient_by_id
+    patient = get_patient_by_id(owner_uid)
+    if not patient:
+        st.warning("📝 No patient profile registered yet. Please register your patient profile first.")
+        if st.button("📝 Register Patient Profile", type="primary", use_container_width=True):
+            st.switch_page("pages/patient.py")
         return
 
-    if (
-        "medicine_df" not in st.session_state
-        or st.session_state.get("medicine_patient_id") != selected_patient_id
-    ):
-        st.session_state["medicine_df"] = _get_medicine_frame(selected_patient_id)
-        st.session_state["medicine_patient_id"] = selected_patient_id
+    st.caption(f"Patient Profile: **{patient.get('name') or patient.get('full_name')}** (ID: `{owner_uid}`)")
+
+    st.session_state["medicine_df"] = _get_medicine_frame(owner_uid)
+    st.session_state["medicine_patient_id"] = owner_uid
 
     if "medicine_edit_index" not in st.session_state:
         st.session_state["medicine_edit_index"] = None

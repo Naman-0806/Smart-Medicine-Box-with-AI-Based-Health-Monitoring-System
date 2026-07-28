@@ -115,24 +115,22 @@ def render_monitoring():
     st.divider()
 
     owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
-    selected_patient_id = st.session_state.get("selected_patient_id")
+    st.session_state["selected_patient_id"] = owner_uid
     refresh_interval = 5
-
-    if not selected_patient_id:
-        st.info("⚠️ No patient selected. Please select or register a patient.")
-        return
 
     if "monitoring_last_refresh" not in st.session_state:
         st.session_state["monitoring_last_refresh"] = time.time()
 
     now = time.time()
     if "monitoring_data" not in st.session_state or (now - st.session_state["monitoring_last_refresh"] >= refresh_interval):
-        st.session_state["monitoring_data"] = get_dashboard_data(selected_patient_id, owner_uid=owner_uid)
+        st.session_state["monitoring_data"] = get_dashboard_data(owner_uid, owner_uid=owner_uid)
         st.session_state["monitoring_last_refresh"] = now
 
     data = st.session_state.get("monitoring_data", {})
     if data.get("no_patients") or not data.get("patient"):
-        st.info("⚠️ No registered patients found. Please register a patient first.")
+        st.warning("📝 No patient profile registered yet. Please register your patient profile first.")
+        if st.button("📝 Register Patient Profile", type="primary", use_container_width=True):
+            st.switch_page("pages/patient.py")
         return
 
     patient = data.get('patient', {})

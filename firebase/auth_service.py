@@ -119,6 +119,7 @@ def signup_user(
     st.session_state["is_logged_in"] = True
     st.session_state["user_uid"] = uid
     st.session_state["owner_uid"] = uid
+    st.session_state["selected_patient_id"] = uid
     st.session_state["auth_user"] = user_data
 
     return True, "Account created successfully! Welcome."
@@ -190,6 +191,7 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
     st.session_state["is_logged_in"] = True
     st.session_state["user_uid"] = uid
     st.session_state["owner_uid"] = uid
+    st.session_state["selected_patient_id"] = uid
     st.session_state["auth_user"] = user_data
 
     return True, "Login successful!"

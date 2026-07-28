@@ -301,16 +301,12 @@ def _render_registration_form(owner_uid):
                 else:
                     new_pid = save_patient_registration(payload, owner_uid=owner_uid)
                     if new_pid:
-                        from datetime import datetime
-                        reg_date_str = datetime.utcnow().strftime("%Y-%m-%d")
-                        st.session_state["reg_success_info"] = {
-                            "msg": f"🎉 Profile created successfully for {r_name.strip()}!",
-                            "patient_id": new_pid,
-                            "created_at": reg_date_str,
-                        }
                         st.session_state["selected_patient_id"] = new_pid
+                        st.session_state["owner_uid"] = new_pid
+                        st.session_state["user_uid"] = new_pid
                         _clear_form()
-                        st.rerun()
+                        st.success(f"🎉 Patient profile saved successfully for {r_name.strip()}! Redirecting to Dashboard...")
+                        st.switch_page("pages/dashboard.py")
                     else:
                         st.error("Failed to save profile to Firebase. Please try again.")
 

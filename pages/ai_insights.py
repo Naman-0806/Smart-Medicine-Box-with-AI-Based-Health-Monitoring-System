@@ -128,12 +128,14 @@ def render_ai():
     st.divider()
 
     owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+    st.session_state["selected_patient_id"] = owner_uid
 
-    selected_patient_id = st.session_state.get("selected_patient_id")
-    data = get_dashboard_data(selected_patient_id, owner_uid=owner_uid)
+    data = get_dashboard_data(owner_uid, owner_uid=owner_uid)
 
     if data.get("no_patients") or not data.get("patient"):
-        st.info("⚠️ No registered patients found. Please register a patient first.")
+        st.warning("📝 No patient profile registered yet. Please register your patient profile first.")
+        if st.button("📝 Register Patient Profile", type="primary", use_container_width=True):
+            st.switch_page("pages/patient.py")
         return
 
     metrics = data.get("metrics", {})
