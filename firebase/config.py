@@ -1,6 +1,18 @@
 import os
 from typing import Any
 
+# Load environment variables from .env file if it exists
+if os.path.exists(".env"):
+    try:
+        with open(".env", "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, val = line.split("=", 1)
+                    os.environ[key.strip()] = val.strip().strip('"').strip("'")
+    except Exception:
+        pass
+
 try:
     # pyrefly: ignore [missing-import]
     import firebase_admin
@@ -64,21 +76,11 @@ def get_firebase_auth() -> Any:
 
 def get_firebase_web_api_key() -> str:
     """Return Firebase Web API Key for client REST authentication."""
-    return (
-        os.getenv("FIREBASE_WEB_API_KEY")
-        or os.getenv("FIREBASE_API_KEY")
-        or os.getenv("WEB_API_KEY")
-        or ""
-    )
-
-def get_firebase_web_api_key():
     key = (
         os.getenv("FIREBASE_WEB_API_KEY")
         or os.getenv("FIREBASE_API_KEY")
         or os.getenv("WEB_API_KEY")
         or ""
     )
-
-    print("API KEY =", key)
-
     return key
+
