@@ -188,21 +188,8 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
 
 
 def logout_user() -> None:
-    """Log out the current user and clear session state."""
-    for key in [
-        "is_logged_in",
-        "user_uid",
-        "owner_uid",
-        "auth_user",
-        "selected_patient_id",
-        "patient_registration_data",
-        "registration_complete",
-        "edit_profile",
-        "medicine_df",
-        "medicine_patient_id",
-        "monitoring_data",
-        "dashboard_last_refresh",
-    ]:
+    """Log out the current user and clear session state completely."""
+    for key in list(st.session_state.keys()):
         st.session_state.pop(key, None)
     st.rerun()
 
@@ -230,7 +217,7 @@ def render_login_page():
                     success, msg = login_user(login_id, login_pwd)
                     if success:
                         st.success(msg)
-                        st.rerun()
+                        st.switch_page("pages/dashboard.py")
                     else:
                         st.error(msg)
 
@@ -254,7 +241,7 @@ def render_login_page():
                     )
                     if success:
                         st.success(msg)
-                        st.rerun()
+                        st.switch_page("pages/dashboard.py")
                     else:
                         st.error(msg)
 
