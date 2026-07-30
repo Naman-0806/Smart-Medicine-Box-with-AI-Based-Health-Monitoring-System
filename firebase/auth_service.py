@@ -29,13 +29,21 @@ def _firebase_rest_auth(endpoint: str, payload: dict) -> Tuple[bool, dict, str]:
 
     try:
         response = requests.post(url, json=payload, timeout=10)
+
+        print("========== FIREBASE RESPONSE ==========")
+        print("Status:", response.status_code)
+        print("Body:", response.text)
+        print("=======================================")
+
         res_data = response.json()
+
         if response.status_code == 200:
             return True, res_data, ""
 
         error_info = res_data.get("error", {})
         err_msg_code = str(error_info.get("message", "")).upper()
         return False, res_data, err_msg_code
+
     except Exception as e:
         return False, {}, str(e)
 

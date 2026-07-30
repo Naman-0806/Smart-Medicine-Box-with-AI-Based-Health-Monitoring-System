@@ -2,7 +2,9 @@ import os
 from typing import Any
 
 try:
+    # pyrefly: ignore [missing-import]
     import firebase_admin
+    # pyrefly: ignore [missing-import]
     from firebase_admin import auth, credentials, firestore
 except Exception:
     firebase_admin = None
