@@ -1,5 +1,6 @@
 import streamlit as st
 from components.sidebar import render_sidebar
+from firebase.auth_service import require_auth
 from firebase.firebase_service import get_dashboard_data
 from src.ui import apply_theme_styles
 

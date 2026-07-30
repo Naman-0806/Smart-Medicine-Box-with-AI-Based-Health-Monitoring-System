@@ -247,7 +247,7 @@ def render_login_page():
 
 
 def require_auth():
-    """Check if user is logged in. If not, show ONLY authentication screen and stop execution."""
+    """Single reusable authentication guard for securing all application pages."""
     user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
     is_logged_in = st.session_state.get("is_logged_in", False)
 
@@ -270,3 +270,6 @@ def require_auth():
         )
         render_login_page()
         st.stop()
+
+    from components.sidebar import render_sidebar
+    render_sidebar()
