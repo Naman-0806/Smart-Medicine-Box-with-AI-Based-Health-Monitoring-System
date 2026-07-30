@@ -97,37 +97,15 @@ def signup_user(
     if phone_clean and not validate_phone(phone_clean):
         return False, "Please enter a valid phone number (e.g. +1234567890)."
 
-    # Attempt Pyrebase4 if available, otherwise Identity Toolkit REST API
-    pyrebase_ok = False
-    uid = None
-    try:
-        # pyrefly: ignore [missing-import]
-        import pyrebase
-        api_key = get_firebase_web_api_key()
-        if api_key:
-            pb_config = {
-                "apiKey": api_key,
-                "authDomain": f"{api_key}.firebaseapp.com",
-                "databaseURL": "",
-                "storageBucket": "",
-            }
-            pb_app = pyrebase.initialize_app(pb_config)
-            pb_auth = pb_app.auth()
-            user = pb_auth.create_user_with_email_and_password(email_clean, password)
-            uid = user.get("localId")
-            pyrebase_ok = True
-    except Exception:
-        pass
+    # Direct Firebase Auth via Identity Toolkit REST API
+    success, res_data, err_code = _firebase_rest_auth(
+        "signUp",
+        {"email": email_clean, "password": password, "returnSecureToken": True}
+    )
+    if not success:
+        return False, _map_firebase_error(err_code, mode="signup")
 
-    if not pyrebase_ok:
-        success, res_data, err_code = _firebase_rest_auth(
-            "signUp",
-            {"email": email_clean, "password": password, "returnSecureToken": True}
-        )
-        if not success:
-            return False, _map_firebase_error(err_code, mode="signup")
-        uid = res_data.get("localId")
-
+    uid = res_data.get("localId")
     if not uid:
         return False, "Failed to retrieve user ID from Firebase Authentication."
 
@@ -140,15 +118,15 @@ def signup_user(
         "created_at": now_iso,
     }
 
-    # Store user profile document in Firestore at /users/{uid} using firebase_admin
+    # Store user profile document in Firestore at /users/{uid} using Firebase Admin SDK
     client = get_firestore_client()
     if client:
         try:
             client.collection("users").document(uid).set(user_data, merge=True)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[WARNING] Failed to save user profile to Firestore: {e}")
 
-    # Store in st.session_state
+    # Store user session state
     st.session_state["is_logged_in"] = True
     st.session_state["user_uid"] = uid
     st.session_state["owner_uid"] = uid
@@ -168,41 +146,19 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
     if not validate_email(clean_id):
         return False, "Please enter a valid email address."
 
-    # Authenticate via Pyrebase4 or Identity Toolkit REST API
-    pyrebase_ok = False
-    uid = None
-    try:
-        # pyrefly: ignore [missing-import]
-        import pyrebase
-        api_key = get_firebase_web_api_key()
-        if api_key:
-            pb_config = {
-                "apiKey": api_key,
-                "authDomain": f"{api_key}.firebaseapp.com",
-                "databaseURL": "",
-                "storageBucket": "",
-            }
-            pb_app = pyrebase.initialize_app(pb_config)
-            pb_auth = pb_app.auth()
-            user = pb_auth.sign_in_with_email_and_password(clean_id, password)
-            uid = user.get("localId")
-            pyrebase_ok = True
-    except Exception:
-        pass
+    # Direct Firebase Auth via Identity Toolkit REST API
+    success, res_data, err_code = _firebase_rest_auth(
+        "signInWithPassword",
+        {"email": clean_id, "password": password, "returnSecureToken": True}
+    )
+    if not success:
+        return False, _map_firebase_error(err_code, mode="login")
 
-    if not pyrebase_ok:
-        success, res_data, err_code = _firebase_rest_auth(
-            "signInWithPassword",
-            {"email": clean_id, "password": password, "returnSecureToken": True}
-        )
-        if not success:
-            return False, _map_firebase_error(err_code, mode="login")
-        uid = res_data.get("localId")
-
+    uid = res_data.get("localId")
     if not uid:
         return False, "User account not found. Please check your credentials or sign up."
 
-    # After successful login, load user's Firestore profile from users/{uid}
+    # After successful authentication, load user profile from Firestore /users/{uid}
     client = get_firestore_client()
     user_data = None
     if client:
@@ -210,8 +166,8 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
             doc = client.collection("users").document(uid).get()
             if doc.exists:
                 user_data = doc.to_dict()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[WARNING] Failed to fetch user profile from Firestore: {e}")
 
     if not user_data:
         user_data = {
@@ -221,7 +177,7 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
             "phone_number": "",
         }
 
-    # Store in st.session_state
+    # Store user session state
     st.session_state["is_logged_in"] = True
     st.session_state["user_uid"] = uid
     st.session_state["owner_uid"] = uid
