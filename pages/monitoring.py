@@ -1,7 +1,6 @@
 import time
 import streamlit as st
 from components.charts import heart_rate_chart, spo2_chart, temperature_chart
-from components.sidebar import render_sidebar
 from firebase.auth_service import require_auth
 from firebase.firebase_service import get_dashboard_data
 from src.ui import apply_theme_styles
@@ -106,16 +105,17 @@ def _render_medicine_reminder(medicines):
 
 def render_monitoring():
     require_auth()
-    render_sidebar()
     apply_theme_styles()
-
 
     st.markdown("# 🩺 Health Monitoring")
     st.caption("Real-time vitals and telemetry tracking for your selected patient.")
     st.divider()
 
-    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
-    st.session_state["selected_patient_id"] = owner_uid
+    user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+    st.session_state["selected_patient_id"] = user_uid
+    st.session_state["owner_uid"] = user_uid
+    st.session_state["user_uid"] = user_uid
+
     refresh_interval = 5
 
     if "monitoring_last_refresh" not in st.session_state:
@@ -123,7 +123,7 @@ def render_monitoring():
 
     now = time.time()
     if "monitoring_data" not in st.session_state or (now - st.session_state["monitoring_last_refresh"] >= refresh_interval):
-        st.session_state["monitoring_data"] = get_dashboard_data(owner_uid, owner_uid=owner_uid)
+        st.session_state["monitoring_data"] = get_dashboard_data(user_uid, owner_uid=user_uid)
         st.session_state["monitoring_last_refresh"] = now
 
     data = st.session_state.get("monitoring_data", {})

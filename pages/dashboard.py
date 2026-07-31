@@ -3,7 +3,6 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 from components.cards import patient_card
-from components.sidebar import render_sidebar
 from components.tables import medicine_table
 from firebase.auth_service import require_auth
 from firebase.firebase_service import get_dashboard_data, process_esp32_data
@@ -78,17 +77,17 @@ def _render_progress_indicators(health_score, spo2, heart_rate):
 
 def render_dashboard():
     require_auth()
-    render_sidebar()
-
 
     st.markdown("# Smart Medicine Box Dashboard", unsafe_allow_html=True)
     st.caption("Live overview of patient wellness, medication activity, and care alerts.")
 
-    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+    user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+    st.session_state["selected_patient_id"] = user_uid
+    st.session_state["owner_uid"] = user_uid
+    st.session_state["user_uid"] = user_uid
 
-    # Fetch dashboard data scoped to owner_uid
-    selected_patient_id = st.session_state.get("selected_patient_id")
-    data = get_dashboard_data(selected_patient_id, owner_uid=owner_uid) or {}
+    # Fetch dashboard data scoped to user_uid
+    data = get_dashboard_data(user_uid, owner_uid=user_uid) or {}
 
     if data.get("no_patients") or not data.get("patient"):
         st.warning("📝 No patient profile found. Redirecting to Patient Registration...")
@@ -111,7 +110,7 @@ def render_dashboard():
         with e_c4:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("📡 Send ESP32 Reading", use_container_width=True):
-                res = process_esp32_data(in_hr, in_spo2, in_temp, patient_id=selected_patient_id)
+                res = process_esp32_data(in_hr, in_spo2, in_temp, patient_id=user_uid)
                 if res.get("success"):
                     st.success(f"ESP32 Vitals saved to Firebase! (Reading ID: {res.get('reading_id')})")
                     st.rerun()

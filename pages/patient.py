@@ -1,6 +1,5 @@
 import pandas as pd
 import streamlit as st
-from components.sidebar import render_sidebar
 from firebase.auth_service import require_auth
 from firebase.firebase_service import (
     check_duplicate_patient,
@@ -317,9 +316,7 @@ def _render_registration_form(owner_uid):
 
 def render_patient():
     require_auth()
-    render_sidebar()
     _apply_styles()
-
 
     st.markdown("# 🩺 Patient Management")
 
@@ -328,7 +325,7 @@ def render_patient():
         st.error("Authentication required. Please log in.")
         return
 
-    # Check if patients/{current_uid} exists in Firestore
+    # Check if users/{current_uid} exists in Firestore
     user_profile = get_patient_by_id(owner_uid, owner_uid=owner_uid)
 
     if user_profile:

@@ -1,5 +1,4 @@
 import streamlit as st
-from components.sidebar import render_sidebar
 from firebase.auth_service import require_auth
 from firebase.firebase_service import get_dashboard_data
 from src.ui import apply_theme_styles
@@ -115,23 +114,20 @@ def _calculate_ai_insights(metrics, medicines):
     }
 
 
-from firebase.auth_service import require_auth
-
-
 def render_ai():
     require_auth()
     apply_theme_styles()
-    render_sidebar()
-
 
     st.markdown("# 🧠 AI Insights")
     st.caption("A concise summary of patient health status and AI-generated care recommendations.")
     st.divider()
 
-    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
-    st.session_state["selected_patient_id"] = owner_uid
+    user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+    st.session_state["selected_patient_id"] = user_uid
+    st.session_state["owner_uid"] = user_uid
+    st.session_state["user_uid"] = user_uid
 
-    data = get_dashboard_data(owner_uid, owner_uid=owner_uid)
+    data = get_dashboard_data(user_uid, owner_uid=user_uid)
 
     if data.get("no_patients") or not data.get("patient"):
         st.warning("📝 No patient profile registered yet. Please register your patient profile first.")

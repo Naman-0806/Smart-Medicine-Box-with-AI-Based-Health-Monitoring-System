@@ -106,10 +106,3 @@ div[data-testid="stVerticalBlockBorderWrapper"] {{
 """,
         unsafe_allow_html=True,
     )
-
-
-# ---------------- Sidebar ---------------- #
-
-def render_sidebar():
-    from components.sidebar import render_sidebar as _render_sidebar
-    return _render_sidebar()

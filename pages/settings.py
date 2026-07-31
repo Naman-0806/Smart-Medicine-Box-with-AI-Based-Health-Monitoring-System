@@ -1,5 +1,4 @@
 import streamlit as st
-from components.sidebar import render_sidebar
 from firebase.auth_service import require_auth
 from firebase.firebase_service import get_patient_by_id
 from src.ui import apply_theme_styles, set_theme
@@ -7,12 +6,10 @@ from src.ui import apply_theme_styles, set_theme
 
 def render_settings():
     require_auth()
-    render_sidebar()
     apply_theme_styles()
 
-
-    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
-    patient = get_patient_by_id(owner_uid, owner_uid=owner_uid) or {}
+    user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+    patient = get_patient_by_id(user_uid, owner_uid=user_uid) or {}
 
     st.markdown("# Settings")
     st.subheader("Theme")

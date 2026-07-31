@@ -1,6 +1,5 @@
 import pandas as pd
 import streamlit as st
-from components.sidebar import render_sidebar
 from firebase.auth_service import require_auth
 from firebase.firebase_service import (
     get_all_patients,
@@ -15,34 +14,32 @@ from src.ui import apply_theme_styles
 
 def render_reports():
     require_auth()
-    render_sidebar()
     apply_theme_styles()
-
 
     st.markdown("# 📊 Patient Health & Activity Reports")
     st.caption("Generate, save, and export comprehensive clinical reports for your selected patient.")
     st.divider()
 
-    owner_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
-    st.session_state["selected_patient_id"] = owner_uid
+    user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+    selected_patient_id = user_uid
+    st.session_state["selected_patient_id"] = user_uid
+    st.session_state["owner_uid"] = user_uid
+    st.session_state["user_uid"] = user_uid
 
-    patient = get_patient_by_id(owner_uid)
+    patient = get_patient_by_id(user_uid)
     if not patient:
         st.warning("📝 No patient profile registered yet. Please register your patient profile first.")
         if st.button("📝 Register Patient Profile", type="primary", use_container_width=True):
             st.switch_page("pages/patient.py")
         return
 
-    selected_patient_id = owner_uid
-    st.caption(f"Patient Profile: **{patient.get('name') or patient.get('full_name')}** (ID: `{owner_uid}`)")
+    st.caption(f"Patient Profile: **{patient.get('name') or patient.get('full_name')}** (ID: `{user_uid}`)")
 
-    with col_pat2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 Refresh Data", use_container_width=True):
-            st.rerun()
+    if st.button("🔄 Refresh Data"):
+        st.rerun()
 
     # Fetch live Firebase data strictly for selected patient
-    data = get_dashboard_data(selected_patient_id, owner_uid=owner_uid)
+    data = get_dashboard_data(selected_patient_id, owner_uid=user_uid)
     patient = data.get("patient", {})
     metrics = data.get("metrics", {})
     medicines = data.get("medicines", [])
@@ -126,14 +123,14 @@ def render_reports():
                 })
             st.dataframe(pd.DataFrame(rpt_rows), use_container_width=True, hide_index=True)
         else:
-            st.info("No saved reports found under subcollection `patients/{patientId}/reports` for this patient.")
+            st.info("No saved reports found under subcollection `users/{userId}/reports` for this patient.")
 
     st.divider()
     st.markdown("### 📥 Download & Save Patient Report")
 
     p_id_str = patient.get("patient_id") or selected_patient_id or "patient"
-    pdf_bytes = generate_pdf_report(patient, metrics, medicines, alerts, ai_recs, trends)
-    html_str = generate_html_report(patient, metrics, medicines, alerts, ai_recs, trends)
+    pdf_bytes = generate_pdf_report(data)
+    html_str = generate_html_report(data)
 
     exp_col1, exp_col2 = st.columns(2)
     with exp_col1:
@@ -150,7 +147,7 @@ def render_reports():
                 "report_type": "PDF",
                 "file_name": f"patient_report_{p_id_str}.pdf",
                 "health_score": metrics.get("health_score"),
-                "generated_by": owner_uid,
+                "generated_by": user_uid,
             })
 
     with exp_col2:
@@ -166,7 +163,7 @@ def render_reports():
                 "report_type": "HTML",
                 "file_name": f"patient_report_{p_id_str}.html",
                 "health_score": metrics.get("health_score"),
-                "generated_by": owner_uid,
+                "generated_by": user_uid,
             })
 
 
