@@ -25,6 +25,11 @@ def validate_phone(phone: str) -> bool:
 def _firebase_rest_auth(endpoint: str, payload: dict) -> Tuple[bool, dict, str]:
     """Execute Firebase Identity Toolkit REST API request."""
     api_key = get_firebase_web_api_key()
+    if not api_key:
+        err_msg = "FIREBASE_WEB_API_KEY environment variable is not set or empty."
+        print(f"[FIREBASE AUTH ERROR] {err_msg}")
+        return False, {}, "MISSING_API_KEY"
+
     url = f"https://identitytoolkit.googleapis.com/v1/accounts:{endpoint}?key={api_key}"
 
     try:
@@ -35,35 +40,53 @@ def _firebase_rest_auth(endpoint: str, payload: dict) -> Tuple[bool, dict, str]:
         print("Body:", response.text)
         print("=======================================")
 
-        res_data = response.json()
+        try:
+            res_data = response.json()
+        except Exception:
+            res_data = {}
 
         if response.status_code == 200:
-            return True, res_data, ""
+            return True, res_data if isinstance(res_data, dict) else {}, ""
 
-        error_info = res_data.get("error", {})
+        error_info = res_data.get("error", {}) if isinstance(res_data, dict) else {}
         err_msg_code = str(error_info.get("message", "")).upper()
-        return False, res_data, err_msg_code
+        if not err_msg_code:
+            err_msg_code = f"HTTP_{response.status_code}"
+
+        print(f"[FIREBASE AUTH ERROR] Endpoint: {endpoint} | Status: {response.status_code} | Exact Firebase Error: {response.text}")
+        return False, res_data if isinstance(res_data, dict) else {}, err_msg_code
 
     except Exception as e:
+        print(f"[FIREBASE AUTH EXCEPTION] Endpoint: {endpoint} | Exception: {type(e).__name__}: {e}")
         return False, {}, str(e)
 
 
 def _map_firebase_error(err_code: str, mode: str = "login") -> str:
     """Map Firebase Auth error string codes to clear user-facing messages."""
-    if "EMAIL_EXISTS" in err_code:
+    err_upper = err_code.upper()
+    if "EMAIL_EXISTS" in err_upper:
         return "An account with this email address already exists."
-    if "INVALID_EMAIL" in err_code:
+    if "INVALID_EMAIL" in err_upper:
         return "Please enter a valid email address."
-    if "WEAK_PASSWORD" in err_code:
+    if "WEAK_PASSWORD" in err_upper or "PASSWORD_TOO_SHORT" in err_upper:
         return "Password must be at least 6 characters long."
-    if "EMAIL_NOT_FOUND" in err_code or "USER_NOT_FOUND" in err_code:
+    if "OPERATION_NOT_ALLOWED" in err_upper:
+        return "Email/Password sign-in is disabled in Firebase Console."
+    if "MISSING_API_KEY" in err_upper or "INVALID_KEY" in err_upper or "API_KEY_INVALID" in err_upper:
+        return "Invalid or missing Firebase API Key. Please check FIREBASE_WEB_API_KEY."
+    if "EMAIL_NOT_FOUND" in err_upper or "USER_NOT_FOUND" in err_upper:
         return "User account not found. Please check your credentials or sign up."
-    if "INVALID_PASSWORD" in err_code or "WRONG_PASSWORD" in err_code or "INVALID_LOGIN_CREDENTIALS" in err_code:
+    if "INVALID_PASSWORD" in err_upper or "WRONG_PASSWORD" in err_upper or "INVALID_LOGIN_CREDENTIALS" in err_upper:
         return "Incorrect password. Please try again."
-    if "USER_DISABLED" in err_code:
+    if "USER_DISABLED" in err_upper:
         return "This user account has been disabled."
-    if "TOO_MANY_ATTEMPTS" in err_code:
+    if "TOO_MANY_ATTEMPTS" in err_upper:
         return "Access temporarily disabled due to many failed attempts. Please try again later."
+
+    if err_code and not err_code.startswith("HTTP_"):
+        if mode == "login":
+            return f"Authentication failed: {err_code}"
+        return f"Account registration failed: {err_code}"
 
     if mode == "login":
         return "Authentication failed. Please check your email and password."
@@ -83,19 +106,29 @@ def signup_user(
     phone_clean = phone_number.strip()
 
     if not email_clean or not password:
-        return False, "Email and password are required fields."
+        err_msg = "Email and password are required fields."
+        print(f"[FIREBASE AUTH ERROR] Signup failed: {err_msg}")
+        return False, err_msg
 
     if not validate_email(email_clean):
-        return False, "Please enter a valid email address (e.g. user@example.com)."
+        err_msg = "Please enter a valid email address (e.g. user@example.com)."
+        print(f"[FIREBASE AUTH ERROR] Signup failed: {err_msg}")
+        return False, err_msg
 
     if len(password) < 6:
-        return False, "Password must be at least 6 characters long."
+        err_msg = "Password must be at least 6 characters long."
+        print(f"[FIREBASE AUTH ERROR] Signup failed: {err_msg}")
+        return False, err_msg
 
     if password != confirm_password:
-        return False, "Passwords do not match."
+        err_msg = "Passwords do not match."
+        print(f"[FIREBASE AUTH ERROR] Signup failed: {err_msg}")
+        return False, err_msg
 
     if phone_clean and not validate_phone(phone_clean):
-        return False, "Please enter a valid phone number (e.g. +1234567890)."
+        err_msg = "Please enter a valid phone number (e.g. +1234567890)."
+        print(f"[FIREBASE AUTH ERROR] Signup failed: {err_msg}")
+        return False, err_msg
 
     # Direct Firebase Auth via Identity Toolkit REST API
     success, res_data, err_code = _firebase_rest_auth(
@@ -103,11 +136,15 @@ def signup_user(
         {"email": email_clean, "password": password, "returnSecureToken": True}
     )
     if not success:
-        return False, _map_firebase_error(err_code, mode="signup")
+        user_facing_msg = _map_firebase_error(err_code, mode="signup")
+        print(f"[FIREBASE AUTH ERROR] Signup failed for {email_clean}: {err_code} -> {user_facing_msg}")
+        return False, user_facing_msg
 
     uid = res_data.get("localId")
     if not uid:
-        return False, "Failed to retrieve user ID from Firebase Authentication."
+        err_msg = "Failed to retrieve user ID from Firebase Authentication."
+        print(f"[FIREBASE AUTH ERROR] Signup failed for {email_clean}: {err_msg}")
+        return False, err_msg
 
     now_iso = datetime.utcnow().isoformat()
     user_data = {
@@ -133,6 +170,7 @@ def signup_user(
     st.session_state["selected_patient_id"] = uid
     st.session_state["auth_user"] = user_data
 
+    print(f"[FIREBASE AUTH SUCCESS] Successfully registered real Firebase user: {email_clean} (UID: {uid})")
     return True, "Account created successfully! Welcome."
 
 
@@ -141,10 +179,14 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
     clean_id = identifier.strip().lower()
 
     if not clean_id or not password:
-        return False, "Please enter both email address and password."
+        err_msg = "Please enter both email address and password."
+        print(f"[FIREBASE AUTH ERROR] Login failed: {err_msg}")
+        return False, err_msg
 
     if not validate_email(clean_id):
-        return False, "Please enter a valid email address."
+        err_msg = "Please enter a valid email address."
+        print(f"[FIREBASE AUTH ERROR] Login failed: {err_msg}")
+        return False, err_msg
 
     # Direct Firebase Auth via Identity Toolkit REST API
     success, res_data, err_code = _firebase_rest_auth(
@@ -152,11 +194,15 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
         {"email": clean_id, "password": password, "returnSecureToken": True}
     )
     if not success:
-        return False, _map_firebase_error(err_code, mode="login")
+        user_facing_msg = _map_firebase_error(err_code, mode="login")
+        print(f"[FIREBASE AUTH ERROR] Login failed for {clean_id}: {err_code} -> {user_facing_msg}")
+        return False, user_facing_msg
 
     uid = res_data.get("localId")
     if not uid:
-        return False, "User account not found. Please check your credentials or sign up."
+        err_msg = "User account not found. Please check your credentials or sign up."
+        print(f"[FIREBASE AUTH ERROR] Login failed for {clean_id}: {err_msg}")
+        return False, err_msg
 
     # After successful authentication, load user profile from Firestore /users/{uid}
     client = get_firestore_client()
@@ -184,6 +230,7 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
     st.session_state["selected_patient_id"] = uid
     st.session_state["auth_user"] = user_data
 
+    print(f"[FIREBASE AUTH SUCCESS] Successfully authenticated real Firebase user: {clean_id} (UID: {uid})")
     return True, "Login successful!"
 
 
