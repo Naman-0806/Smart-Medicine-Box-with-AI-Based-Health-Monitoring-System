@@ -258,7 +258,7 @@ def _render_registration_form(owner_uid):
             r_allergies = st.text_area("Allergies", key="reg_allergies", value=existing_profile.get("allergies") or "", height=80)
         with col6:
             r_meds = st.text_area("Current Medications", key="reg_current_medications", value=existing_profile.get("current_medications") or "", height=80)
-            r_doctor = st.text_input("Doctor Name", key="reg_doctor_name", value=existing_profile.get("doctor_name") or "Dr. Smith")
+            r_doctor = st.text_input("Doctor Name", key="reg_doctor_name", value=existing_profile.get("doctor_name") or "")
             r_hospital = st.text_input("Hospital Name", key="reg_hospital_name", value=existing_profile.get("hospital_name") or "")
         st.markdown("</div>", unsafe_allow_html=True)
 

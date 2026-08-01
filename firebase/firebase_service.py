@@ -29,13 +29,20 @@ def invalidate_firebase_cache():
 
 
 def _resolve_user_uid(uid: Optional[str] = None) -> Optional[str]:
-    """Helper to resolve the current user's Firebase UID consistently."""
+    """Helper to resolve the current user's Firebase UID consistently. Always prioritizes st.session_state['user_uid']."""
+    try:
+        import streamlit as st
+        session_uid = st.session_state.get("user_uid")
+        if session_uid and str(session_uid).strip():
+            return str(session_uid).strip()
+    except Exception:
+        pass
     if uid and str(uid).strip():
         return str(uid).strip()
     try:
         import streamlit as st
-        resolved = st.session_state.get("user_uid") or st.session_state.get("owner_uid") or st.session_state.get("selected_patient_id")
-        if resolved:
+        resolved = st.session_state.get("owner_uid") or st.session_state.get("selected_patient_id")
+        if resolved and str(resolved).strip():
             return str(resolved).strip()
     except Exception:
         pass
@@ -274,7 +281,7 @@ def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[
             "existing_diseases": patient_data.get("existing_diseases") or patient_data.get("disease") or existing_data.get("existing_diseases") or "",
             "allergies": patient_data.get("allergies") or existing_data.get("allergies") or "",
             "current_medications": patient_data.get("current_medications") or existing_data.get("current_medications") or "",
-            "doctor_name": patient_data.get("doctor_name") or existing_data.get("doctor_name") or "Dr. Assigned",
+            "doctor_name": patient_data.get("doctor_name") or existing_data.get("doctor_name") or "",
             "hospital_name": patient_data.get("hospital_name") or existing_data.get("hospital_name") or "",
             "medicine_box_id": patient_data.get("medicine_box_id") or existing_data.get("medicine_box_id") or f"BOX-{uid[:6].upper()}",
             "device_serial_number": patient_data.get("device_serial_number") or existing_data.get("device_serial_number") or f"DEV-{uid[:6].upper()}",
