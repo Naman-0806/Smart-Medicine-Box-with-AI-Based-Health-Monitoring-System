@@ -116,98 +116,108 @@ def check_duplicate_patient(
     return False, ""
 
 
-def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[str] = None) -> Optional[str]:
-    """Save or update patient profile directly under /users/{uid} and /patients/{uid}."""
+def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[str] = None) -> Tuple[bool, str]:
+    """Save or update patient profile directly under /users/{uid}/patient/profile in Cloud Firestore."""
     uid = _resolve_user_uid(owner_uid)
     if not uid or not isinstance(patient_data, dict):
-        return None
+        return False, "Invalid authentication or patient data."
 
     client = get_firestore_client()
+    if client is None:
+        err_msg = "Firestore client could not be initialized. Please check FIREBASE_SERVICE_ACCOUNT_PATH."
+        print(f"[FIRESTORE ERROR] {err_msg}")
+        return False, err_msg
+
     now_iso = datetime.utcnow().isoformat()
+    profile_ref = client.collection("users").document(uid).collection("patient").document("profile")
 
-    doc_ref_user = client.collection("users").document(uid) if client else None
-    doc_ref_patient = client.collection("patients").document(uid) if client else None
+    try:
+        existing_doc = profile_ref.get()
+        if not existing_doc.exists:
+            fallback_doc = client.collection("users").document(uid).get()
+            existing_doc = fallback_doc if fallback_doc.exists else client.collection("patients").document(uid).get()
+        existing_data = existing_doc.to_dict() if (existing_doc and existing_doc.exists) else {}
 
-    existing_doc = doc_ref_user.get() if doc_ref_user else (doc_ref_patient.get() if doc_ref_patient else None)
-    existing_data = existing_doc.to_dict() if (existing_doc and existing_doc.exists) else {}
+        raw_dob = patient_data.get("dob") or existing_data.get("dob") or ""
+        dob_str = str(raw_dob) if raw_dob else ""
 
-    raw_dob = patient_data.get("dob") or existing_data.get("dob") or ""
-    dob_str = str(raw_dob) if raw_dob else ""
+        payload = {
+            "uid": uid,
+            "patient_id": uid,
+            "id": uid,
+            "ownerUid": uid,
+            "owner_uid": uid,
+            "name": patient_data.get("name") or patient_data.get("full_name") or existing_data.get("name") or "",
+            "full_name": patient_data.get("full_name") or patient_data.get("name") or existing_data.get("full_name") or "",
+            "age": patient_data.get("age") if patient_data.get("age") is not None else existing_data.get("age"),
+            "gender": patient_data.get("gender") or existing_data.get("gender") or "Other",
+            "dob": dob_str,
+            "blood_group": patient_data.get("blood_group") or existing_data.get("blood_group") or "A+",
+            "height": patient_data.get("height") if patient_data.get("height") is not None else existing_data.get("height"),
+            "weight": patient_data.get("weight") if patient_data.get("weight") is not None else existing_data.get("weight"),
+            "phone_number": patient_data.get("phone_number") or existing_data.get("phone_number") or "",
+            "email": patient_data.get("email") or existing_data.get("email") or "",
+            "address": patient_data.get("address") or existing_data.get("address") or "",
+            "emergency_name": patient_data.get("emergency_name") or existing_data.get("emergency_name") or "",
+            "emergency_phone": patient_data.get("emergency_phone") or existing_data.get("emergency_phone") or "",
+            "disease": patient_data.get("disease") or patient_data.get("existing_diseases") or existing_data.get("disease") or "",
+            "existing_diseases": patient_data.get("existing_diseases") or patient_data.get("disease") or existing_data.get("existing_diseases") or "",
+            "allergies": patient_data.get("allergies") or existing_data.get("allergies") or "",
+            "current_medications": patient_data.get("current_medications") or existing_data.get("current_medications") or "",
+            "doctor_name": patient_data.get("doctor_name") or existing_data.get("doctor_name") or "Dr. Assigned",
+            "hospital_name": patient_data.get("hospital_name") or existing_data.get("hospital_name") or "",
+            "medicine_box_id": patient_data.get("medicine_box_id") or existing_data.get("medicine_box_id") or f"BOX-{uid[:6].upper()}",
+            "device_serial_number": patient_data.get("device_serial_number") or existing_data.get("device_serial_number") or f"DEV-{uid[:6].upper()}",
+            "device_status": existing_data.get("device_status", "Connected"),
+            "battery_level": existing_data.get("battery_level", 90),
+            "created_at": existing_data.get("created_at", now_iso),
+            "updated_at": now_iso,
+            "last_sync": now_iso,
+        }
 
-    payload = {
-        "uid": uid,
-        "patient_id": uid,
-        "id": uid,
-        "ownerUid": uid,
-        "owner_uid": uid,
-        "name": patient_data.get("name") or patient_data.get("full_name") or existing_data.get("name") or "",
-        "full_name": patient_data.get("full_name") or patient_data.get("name") or existing_data.get("full_name") or "",
-        "age": patient_data.get("age") if patient_data.get("age") is not None else existing_data.get("age"),
-        "gender": patient_data.get("gender") or existing_data.get("gender") or "Other",
-        "dob": dob_str,
-        "blood_group": patient_data.get("blood_group") or existing_data.get("blood_group") or "A+",
-        "height": patient_data.get("height") if patient_data.get("height") is not None else existing_data.get("height"),
-        "weight": patient_data.get("weight") if patient_data.get("weight") is not None else existing_data.get("weight"),
-        "phone_number": patient_data.get("phone_number") or existing_data.get("phone_number") or "",
-        "email": patient_data.get("email") or existing_data.get("email") or "",
-        "address": patient_data.get("address") or existing_data.get("address") or "",
-        "emergency_name": patient_data.get("emergency_name") or existing_data.get("emergency_name") or "",
-        "emergency_phone": patient_data.get("emergency_phone") or existing_data.get("emergency_phone") or "",
-        "disease": patient_data.get("disease") or patient_data.get("existing_diseases") or existing_data.get("disease") or "",
-        "existing_diseases": patient_data.get("existing_diseases") or patient_data.get("disease") or existing_data.get("existing_diseases") or "",
-        "allergies": patient_data.get("allergies") or existing_data.get("allergies") or "",
-        "current_medications": patient_data.get("current_medications") or existing_data.get("current_medications") or "",
-        "doctor_name": patient_data.get("doctor_name") or existing_data.get("doctor_name") or "Dr. Assigned",
-        "hospital_name": patient_data.get("hospital_name") or existing_data.get("hospital_name") or "",
-        "medicine_box_id": patient_data.get("medicine_box_id") or existing_data.get("medicine_box_id") or f"BOX-{uid[:6].upper()}",
-        "device_serial_number": patient_data.get("device_serial_number") or existing_data.get("device_serial_number") or f"DEV-{uid[:6].upper()}",
-        "device_status": existing_data.get("device_status", "Connected"),
-        "battery_level": existing_data.get("battery_level", 90),
-        "created_at": existing_data.get("created_at", now_iso),
-        "updated_at": now_iso,
-        "last_sync": now_iso,
-    }
+        # Perform Firestore write under users/{uid}/patient/profile
+        profile_ref.set(payload, merge=True)
 
-    if client is not None:
+        # Mirror write to top-level users/{uid} and patients/{uid} for queries
         try:
-            if doc_ref_user:
-                doc_ref_user.set(payload, merge=True)
-            if doc_ref_patient:
-                doc_ref_patient.set(payload, merge=True)
-            invalidate_firebase_cache()
-            return uid
-        except Exception as e:
-            print(f"[ERROR] save_patient_registration failed: {e}")
-            return None
+            client.collection("users").document(uid).set(payload, merge=True)
+            client.collection("patients").document(uid).set(payload, merge=True)
+        except Exception:
+            pass
 
-    invalidate_firebase_cache()
-    return uid
+        invalidate_firebase_cache()
+        return True, "Patient profile saved successfully in Cloud Firestore!"
+
+    except Exception as e:
+        print(f"[FIRESTORE ERROR] save_patient_registration failed: {e}")
+        return False, f"Firestore Error: {type(e).__name__}: {str(e)}"
 
 
 def update_patient_registration(
     patient_id: str,
     update_data: Dict[str, Any],
     owner_uid: Optional[str] = None
-) -> bool:
-    """Update existing patient document under /users/{uid} and /patients/{uid}."""
+) -> Tuple[bool, str]:
+    """Update existing patient document under /users/{uid}/patient/profile."""
     uid = _resolve_user_uid(patient_id or owner_uid)
     if not uid or not isinstance(update_data, dict):
-        return False
+        return False, "Invalid patient ID or profile data."
 
     client = get_firestore_client()
     if client is None:
-        return False
+        err_msg = "Firestore client could not be initialized. Check FIREBASE_SERVICE_ACCOUNT_PATH."
+        print(f"[FIRESTORE ERROR] {err_msg}")
+        return False, err_msg
 
     try:
-        doc_user = client.collection("users").document(uid)
-        doc_pat = client.collection("patients").document(uid)
-        doc = doc_user.get()
+        profile_ref = client.collection("users").document(uid).collection("patient").document("profile")
+        doc = profile_ref.get()
         if not doc.exists:
-            doc = doc_pat.get()
+            doc = client.collection("users").document(uid).get()
         if not doc.exists:
-            return False
+            doc = client.collection("patients").document(uid).get()
 
-        doc_dict = doc.to_dict() or {}
+        doc_dict = doc.to_dict() if doc.exists else {}
         payload = {
             "name": update_data.get("name") or update_data.get("full_name") or doc_dict.get("name"),
             "full_name": update_data.get("full_name") or update_data.get("name") or doc_dict.get("full_name"),
@@ -233,25 +243,39 @@ def update_patient_registration(
             "updated_at": datetime.utcnow().isoformat(),
         }
 
-        doc_user.set(payload, merge=True)
-        doc_pat.set(payload, merge=True)
+        # Perform Firestore write to users/{uid}/patient/profile
+        profile_ref.set(payload, merge=True)
+
+        # Mirror write to users/{uid} and patients/{uid}
+        try:
+            client.collection("users").document(uid).set(payload, merge=True)
+            client.collection("patients").document(uid).set(payload, merge=True)
+        except Exception:
+            pass
+
         invalidate_firebase_cache()
-        return True
-    except Exception:
-        return False
+        return True, "Patient profile updated successfully in Cloud Firestore!"
+    except Exception as e:
+        print(f"[FIRESTORE ERROR] update_patient_registration failed: {e}")
+        return False, f"Firestore Error: {type(e).__name__}: {str(e)}"
 
 
-def delete_patient(patient_id: str, owner_uid: Optional[str] = None) -> bool:
-    """Delete patient document /users/{uid} and /patients/{uid} and all subcollections."""
+def delete_patient(patient_id: str, owner_uid: Optional[str] = None) -> Tuple[bool, str]:
+    """Delete patient profile document under /users/{uid}/patient/profile and parent documents."""
     uid = _resolve_user_uid(patient_id or owner_uid)
     if not uid:
-        return False
+        return False, "Authentication / User ID missing."
 
     client = get_firestore_client()
     if client is None:
-        return False
+        return False, "Firestore client not initialized."
 
     try:
+        # Delete subcollection document users/{uid}/patient/profile
+        prof_ref = client.collection("users").document(uid).collection("patient").document("profile")
+        if prof_ref.get().exists:
+            prof_ref.delete()
+
         for parent_col in ["users", "patients"]:
             p_ref = client.collection(parent_col).document(uid)
             doc = p_ref.get()
@@ -268,13 +292,14 @@ def delete_patient(patient_id: str, owner_uid: Optional[str] = None) -> bool:
         if uid in _ESP32_LIVE_CACHE:
             del _ESP32_LIVE_CACHE[uid]
         invalidate_firebase_cache()
-        return True
-    except Exception:
-        return False
+        return True, "Patient profile deleted successfully from Cloud Firestore!"
+    except Exception as e:
+        print(f"[FIRESTORE ERROR] delete_patient failed: {e}")
+        return False, f"Firestore Error: {type(e).__name__}: {str(e)}"
 
 
 def get_all_patients(owner_uid: Optional[str] = None, force_refresh: bool = False) -> List[Dict[str, Any]]:
-    """Return patient document for the authenticated user (1 user = 1 patient profile at /users/{uid})."""
+    """Return patient document for the authenticated user (1 user = 1 patient profile at /users/{uid}/patient/profile)."""
     uid = _resolve_user_uid(owner_uid)
     if not uid:
         return []
@@ -284,7 +309,7 @@ def get_all_patients(owner_uid: Optional[str] = None, force_refresh: bool = Fals
 
 
 def get_patient_by_id(patient_id: Optional[str] = None, owner_uid: Optional[str] = None, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
-    """Retrieve patient profile document directly from /users/{uid} or /patients/{uid}."""
+    """Retrieve patient profile document directly from /users/{uid}/patient/profile."""
     uid = _resolve_user_uid(patient_id or owner_uid)
     if not uid:
         return None
@@ -303,11 +328,15 @@ def get_patient_by_id(patient_id: Optional[str] = None, owner_uid: Optional[str]
         return None
 
     try:
-        doc = client.collection("users").document(uid).get()
+        # Check primary path: users/{uid}/patient/profile
+        doc = client.collection("users").document(uid).collection("patient").document("profile").get()
+        if not doc.exists:
+            doc = client.collection("users").document(uid).get()
         if not doc.exists:
             doc = client.collection("patients").document(uid).get()
         if not doc.exists:
             return None
+
         data = doc.to_dict() or {}
         data["id"] = uid
         data["patient_id"] = uid
@@ -325,7 +354,8 @@ def get_patient_by_id(patient_id: Optional[str] = None, owner_uid: Optional[str]
             pass
 
         return data
-    except Exception:
+    except Exception as e:
+        print(f"[FIRESTORE ERROR] get_patient_by_id failed: {e}")
         return None
 
 
@@ -368,6 +398,7 @@ def process_esp32_data(
                 "blood_pressure": blood_pressure or "120/80",
                 "last_sync": now_iso
             }
+            client.collection("users").document(uid).collection("patient").document("profile").set(update_payload, merge=True)
             client.collection("users").document(uid).set(update_payload, merge=True)
             client.collection("patients").document(uid).set(update_payload, merge=True)
         except Exception:
@@ -832,7 +863,7 @@ def get_patient_health_trends(patient_id: Optional[str] = None) -> pd.DataFrame:
 
 
 def get_dashboard_data(patient_id: Optional[str] = None, owner_uid: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:
-    """Return dashboard data for the authenticated patient directly from /users/{uid}."""
+    """Return dashboard data for the authenticated patient directly from /users/{uid}/patient/profile."""
     uid = _resolve_user_uid(patient_id or owner_uid)
     if not uid:
         return {

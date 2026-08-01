@@ -44,7 +44,7 @@ def _clear_form():
 def _render_my_profile_view_and_update(patient_id, owner_uid):
     patient_data = get_patient_by_id(patient_id, owner_uid=owner_uid)
     if not patient_data:
-        st.error("Patient profile details could not be retrieved from Firebase.")
+        st.error("Patient profile details could not be retrieved from Cloud Firestore.")
         return
 
     # Render post-registration success banner if present
@@ -104,13 +104,14 @@ def _render_my_profile_view_and_update(patient_id, owner_uid):
             c_del1, c_del2 = st.columns(2)
             with c_del1:
                 if st.button("Confirm Delete Profile", key="btn_confirm_del", type="primary"):
-                    if delete_patient(patient_id, owner_uid=owner_uid):
-                        st.success("Patient profile deleted successfully from Firebase.")
+                    success, res_msg = delete_patient(patient_id, owner_uid=owner_uid)
+                    if success:
+                        st.success(res_msg)
                         st.session_state.pop("selected_patient_id", None)
                         st.session_state.pop("confirm_delete_patient", None)
                         st.rerun()
                     else:
-                        st.error("Failed to delete profile from Firebase.")
+                        st.error(res_msg)
             with c_del2:
                 if st.button("Cancel", key="btn_cancel_del"):
                     st.session_state.pop("confirm_delete_patient", None)
@@ -194,12 +195,13 @@ def _render_my_profile_view_and_update(patient_id, owner_uid):
                     if is_dup:
                         st.error(dup_msg)
                     else:
-                        if update_patient_registration(patient_id, upd_payload, owner_uid=owner_uid):
-                            st.success("Patient profile updated successfully in Firebase!")
+                        success, res_msg = update_patient_registration(patient_id, upd_payload, owner_uid=owner_uid)
+                        if success:
+                            st.success(res_msg)
                             st.session_state["editing_patient_profile"] = False
                             st.rerun()
                         else:
-                            st.error("Failed to update patient profile in Firebase.")
+                            st.error(res_msg)
 
             if btn_cancel:
                 st.session_state["editing_patient_profile"] = False
@@ -210,52 +212,63 @@ def _render_registration_form(owner_uid):
     st.markdown("## ➕ Register Patient Profile")
     st.caption("Fill out patient information to save your profile in Firebase.")
 
+    existing_profile = get_patient_by_id(owner_uid) or {}
+    auth_user = st.session_state.get("auth_user") or {}
+
+    def_name = existing_profile.get("name") or existing_profile.get("full_name") or auth_user.get("full_name") or ""
+    def_email = existing_profile.get("email") or auth_user.get("email") or ""
+    def_phone = existing_profile.get("phone_number") or auth_user.get("phone_number") or ""
+
     with st.form("new_patient_registration_form"):
         st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.markdown("<div class='section-title'>Personal Information</div>", unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
-            r_name = st.text_input("Full Name *", key="reg_full_name")
-            r_age = st.number_input("Age", min_value=0, max_value=120, value=30, step=1, key="reg_age")
-            r_gender = st.selectbox("Gender", ["Male", "Female", "Other"], index=0, key="reg_gender")
+            r_name = st.text_input("Full Name *", key="reg_full_name", value=def_name)
+            r_age = st.number_input("Age", min_value=0, max_value=120, value=int(existing_profile.get("age") or 30), step=1, key="reg_age")
+            gender_opts = ["Male", "Female", "Other"]
+            curr_g = existing_profile.get("gender") if existing_profile.get("gender") in gender_opts else "Male"
+            r_gender = st.selectbox("Gender", gender_opts, index=gender_opts.index(curr_g), key="reg_gender")
             r_dob = st.date_input("Date of Birth", key="reg_dob")
         with col2:
-            r_blood = st.selectbox("Blood Group", ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"], index=0, key="reg_blood_group")
-            r_height = st.number_input("Height (cm)", min_value=0, max_value=250, value=170, step=1, key="reg_height")
-            r_weight = st.number_input("Weight (kg)", min_value=0, max_value=300, value=70, step=1, key="reg_weight")
+            blood_opts = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"]
+            curr_b = existing_profile.get("blood_group") if existing_profile.get("blood_group") in blood_opts else "A+"
+            r_blood = st.selectbox("Blood Group", blood_opts, index=blood_opts.index(curr_b), key="reg_blood_group")
+            r_height = st.number_input("Height (cm)", min_value=0, max_value=250, value=int(existing_profile.get("height") or 170), step=1, key="reg_height")
+            r_weight = st.number_input("Weight (kg)", min_value=0, max_value=300, value=int(existing_profile.get("weight") or 70), step=1, key="reg_weight")
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.markdown("<div class='section-title'>Contact Information</div>", unsafe_allow_html=True)
         col3, col4 = st.columns(2)
         with col3:
-            r_phone = st.text_input("Phone Number", key="reg_phone_number", placeholder="+1234567890")
-            r_email = st.text_input("Email Address", key="reg_email", placeholder="patient@example.com")
+            r_phone = st.text_input("Phone Number", key="reg_phone_number", value=def_phone, placeholder="+1234567890")
+            r_email = st.text_input("Email Address", key="reg_email", value=def_email, placeholder="patient@example.com")
         with col4:
-            r_em_name = st.text_input("Emergency Contact Name", key="reg_emergency_name")
-            r_em_phone = st.text_input("Emergency Contact Number", key="reg_emergency_phone")
-        r_address = st.text_area("Address", key="reg_address", height=80)
+            r_em_name = st.text_input("Emergency Contact Name", key="reg_emergency_name", value=existing_profile.get("emergency_name") or "")
+            r_em_phone = st.text_input("Emergency Contact Number", key="reg_emergency_phone", value=existing_profile.get("emergency_phone") or "")
+        r_address = st.text_area("Address", key="reg_address", value=existing_profile.get("address") or "", height=80)
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.markdown("<div class='section-title'>Medical Information</div>", unsafe_allow_html=True)
         col5, col6 = st.columns(2)
         with col5:
-            r_disease = st.text_area("Existing Diseases / Conditions", key="reg_existing_diseases", height=80)
-            r_allergies = st.text_area("Allergies", key="reg_allergies", height=80)
+            r_disease = st.text_area("Existing Diseases / Conditions", key="reg_existing_diseases", value=existing_profile.get("disease") or existing_profile.get("existing_diseases") or "", height=80)
+            r_allergies = st.text_area("Allergies", key="reg_allergies", value=existing_profile.get("allergies") or "", height=80)
         with col6:
-            r_meds = st.text_area("Current Medications", key="reg_current_medications", height=80)
-            r_doctor = st.text_input("Doctor Name", key="reg_doctor_name", value="Dr. Smith")
-            r_hospital = st.text_input("Hospital Name", key="reg_hospital_name")
+            r_meds = st.text_area("Current Medications", key="reg_current_medications", value=existing_profile.get("current_medications") or "", height=80)
+            r_doctor = st.text_input("Doctor Name", key="reg_doctor_name", value=existing_profile.get("doctor_name") or "Dr. Smith")
+            r_hospital = st.text_input("Hospital Name", key="reg_hospital_name", value=existing_profile.get("hospital_name") or "")
         st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.markdown("<div class='section-title'>Device Information</div>", unsafe_allow_html=True)
         col7, col8 = st.columns(2)
         with col7:
-            r_box_id = st.text_input("Medicine Box ID", key="reg_medicine_box_id")
+            r_box_id = st.text_input("Medicine Box ID", key="reg_medicine_box_id", value=existing_profile.get("medicine_box_id") or "")
         with col8:
-            r_dev_serial = st.text_input("Device Serial Number", key="reg_device_serial_number")
+            r_dev_serial = st.text_input("Device Serial Number", key="reg_device_serial_number", value=existing_profile.get("device_serial_number") or "")
         st.markdown("</div>", unsafe_allow_html=True)
 
         c_sub, c_clr = st.columns([1, 1])
@@ -298,16 +311,16 @@ def _render_registration_form(owner_uid):
                 if is_dup:
                     st.error(dup_msg)
                 else:
-                    new_pid = save_patient_registration(payload, owner_uid=owner_uid)
-                    if new_pid:
-                        st.session_state["selected_patient_id"] = new_pid
-                        st.session_state["owner_uid"] = new_pid
-                        st.session_state["user_uid"] = new_pid
+                    success, res_msg = save_patient_registration(payload, owner_uid=owner_uid)
+                    if success:
+                        st.session_state["selected_patient_id"] = owner_uid
+                        st.session_state["owner_uid"] = owner_uid
+                        st.session_state["user_uid"] = owner_uid
                         _clear_form()
-                        st.success(f"🎉 Patient profile saved successfully for {r_name.strip()}! Redirecting to Dashboard...")
+                        st.success(res_msg)
                         st.switch_page("pages/dashboard.py")
                     else:
-                        st.error("Failed to save profile to Firebase. Please try again.")
+                        st.error(res_msg)
 
         if cleared:
             _clear_form()
@@ -325,8 +338,8 @@ def render_patient():
         st.error("Authentication required. Please log in.")
         return
 
-    # Check if users/{current_uid} exists in Firestore
-    user_profile = get_patient_by_id(owner_uid, owner_uid=owner_uid)
+    # Check if users/{current_uid}/patient/profile exists in Firestore automatically on page open
+    user_profile = get_patient_by_id(owner_uid, owner_uid=owner_uid, force_refresh=True)
 
     if user_profile:
         st.session_state["selected_patient_id"] = owner_uid
