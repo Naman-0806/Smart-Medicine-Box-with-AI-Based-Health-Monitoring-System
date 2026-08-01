@@ -42,6 +42,62 @@ def _resolve_user_uid(uid: Optional[str] = None) -> Optional[str]:
     return None
 
 
+def _migrate_legacy_patient_data_if_needed(client: Any, uid: str) -> None:
+    """Automatically migrate patient data from /patients/{uid} to /users/{uid}/patient/profile if found."""
+    if not client or not uid:
+        return
+
+    try:
+        profile_ref = client.collection("users").document(uid).collection("patient").document("profile")
+        profile_doc = profile_ref.get()
+
+        # If profile document already exists, no migration needed
+        if profile_doc.exists:
+            return
+
+        # Check for legacy document in /patients/{uid}
+        legacy_pat_ref = client.collection("patients").document(uid)
+        legacy_pat_doc = legacy_pat_ref.get()
+
+        legacy_user_ref = client.collection("users").document(uid)
+        legacy_user_doc = legacy_user_ref.get()
+
+        legacy_data = {}
+        if legacy_pat_doc.exists:
+            legacy_data = legacy_pat_doc.to_dict() or {}
+        elif legacy_user_doc.exists:
+            legacy_data = legacy_user_doc.to_dict() or {}
+
+        # If legacy data is found, migrate to users/{uid}/patient/profile
+        if legacy_data and (legacy_data.get("name") or legacy_data.get("full_name") or legacy_data.get("patient_id")):
+            print(f"[FIRESTORE MIGRATION] Migrating patient profile for '{uid}' to /users/{uid}/patient/profile...")
+            profile_ref.set(legacy_data, merge=True)
+
+            # Migrate any subcollections from /patients/{uid} to /users/{uid}
+            if legacy_pat_doc.exists:
+                for sub_col in ["medicines", "health", "readings", "alerts", "ai_recommendations", "reports"]:
+                    try:
+                        sub_docs = list(legacy_pat_ref.collection(sub_col).stream())
+                        for s_doc in sub_docs:
+                            s_data = s_doc.to_dict() or {}
+                            target_ref = client.collection("users").document(uid).collection(sub_col).document(s_doc.id)
+                            if not target_ref.get().exists:
+                                target_ref.set(s_data, merge=True)
+                            s_doc.reference.delete()
+                    except Exception as e_sub:
+                        print(f"[FIRESTORE MIGRATION WARNING] Subcollection '{sub_col}' migration note: {e_sub}")
+
+                # Clean up legacy patients/{uid} document after migration
+                try:
+                    legacy_pat_ref.delete()
+                except Exception:
+                    pass
+
+            print(f"[FIRESTORE MIGRATION] Successfully migrated patient profile for '{uid}' to /users/{uid}/patient/profile.")
+    except Exception as e:
+        print(f"[FIRESTORE MIGRATION ERROR] Automatic migration failed for '{uid}': {e}")
+
+
 def validate_patient_input(patient_data: Dict[str, Any]) -> Tuple[bool, str]:
     """Validate patient registration & profile input data strictly."""
     name = str(patient_data.get("name") or patient_data.get("full_name") or "").strip()
@@ -117,7 +173,7 @@ def check_duplicate_patient(
 
 
 def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[str] = None) -> Tuple[bool, str]:
-    """Save or update patient profile directly under /users/{uid}/patient/profile in Cloud Firestore."""
+    """Save or update patient profile under /users/{uid}/patient/profile in Cloud Firestore."""
     uid = _resolve_user_uid(owner_uid)
     if not uid or not isinstance(patient_data, dict):
         return False, "Invalid authentication or patient data."
@@ -132,10 +188,8 @@ def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[
     profile_ref = client.collection("users").document(uid).collection("patient").document("profile")
 
     try:
+        _migrate_legacy_patient_data_if_needed(client, uid)
         existing_doc = profile_ref.get()
-        if not existing_doc.exists:
-            fallback_doc = client.collection("users").document(uid).get()
-            existing_doc = fallback_doc if fallback_doc.exists else client.collection("patients").document(uid).get()
         existing_data = existing_doc.to_dict() if (existing_doc and existing_doc.exists) else {}
 
         raw_dob = patient_data.get("dob") or existing_data.get("dob") or ""
@@ -175,13 +229,25 @@ def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[
             "last_sync": now_iso,
         }
 
-        # Perform Firestore write under users/{uid}/patient/profile
+        # Perform Firestore write strictly to users/{uid}/patient/profile
         profile_ref.set(payload, merge=True)
 
-        # Mirror write to top-level users/{uid} and patients/{uid} for queries
+        # Update root user metadata document under users/{uid}
         try:
-            client.collection("users").document(uid).set(payload, merge=True)
-            client.collection("patients").document(uid).set(payload, merge=True)
+            client.collection("users").document(uid).set({
+                "patient_profile_updated": now_iso,
+                "name": payload["name"],
+                "email": payload["email"],
+                "phone_number": payload["phone_number"]
+            }, merge=True)
+        except Exception:
+            pass
+
+        # Clean up legacy patients/{uid} document if present
+        try:
+            legacy_ref = client.collection("patients").document(uid)
+            if legacy_ref.get().exists:
+                legacy_ref.delete()
         except Exception:
             pass
 
@@ -210,12 +276,9 @@ def update_patient_registration(
         return False, err_msg
 
     try:
+        _migrate_legacy_patient_data_if_needed(client, uid)
         profile_ref = client.collection("users").document(uid).collection("patient").document("profile")
         doc = profile_ref.get()
-        if not doc.exists:
-            doc = client.collection("users").document(uid).get()
-        if not doc.exists:
-            doc = client.collection("patients").document(uid).get()
 
         doc_dict = doc.to_dict() if doc.exists else {}
         payload = {
@@ -246,10 +309,21 @@ def update_patient_registration(
         # Perform Firestore write to users/{uid}/patient/profile
         profile_ref.set(payload, merge=True)
 
-        # Mirror write to users/{uid} and patients/{uid}
+        # Update root user metadata document under users/{uid}
         try:
-            client.collection("users").document(uid).set(payload, merge=True)
-            client.collection("patients").document(uid).set(payload, merge=True)
+            client.collection("users").document(uid).set({
+                "patient_profile_updated": datetime.utcnow().isoformat(),
+                "name": payload["name"],
+                "email": payload["email"]
+            }, merge=True)
+        except Exception:
+            pass
+
+        # Clean up legacy patients/{uid} document if present
+        try:
+            legacy_ref = client.collection("patients").document(uid)
+            if legacy_ref.get().exists:
+                legacy_ref.delete()
         except Exception:
             pass
 
@@ -261,7 +335,7 @@ def update_patient_registration(
 
 
 def delete_patient(patient_id: str, owner_uid: Optional[str] = None) -> Tuple[bool, str]:
-    """Delete patient profile document under /users/{uid}/patient/profile and parent documents."""
+    """Delete patient profile document under /users/{uid}/patient/profile and associated user data."""
     uid = _resolve_user_uid(patient_id or owner_uid)
     if not uid:
         return False, "Authentication / User ID missing."
@@ -271,23 +345,32 @@ def delete_patient(patient_id: str, owner_uid: Optional[str] = None) -> Tuple[bo
         return False, "Firestore client not initialized."
 
     try:
-        # Delete subcollection document users/{uid}/patient/profile
+        # Delete profile document users/{uid}/patient/profile
         prof_ref = client.collection("users").document(uid).collection("patient").document("profile")
         if prof_ref.get().exists:
             prof_ref.delete()
 
-        for parent_col in ["users", "patients"]:
-            p_ref = client.collection(parent_col).document(uid)
-            doc = p_ref.get()
-            if doc.exists:
-                for sub_col in ["medicines", "health", "readings", "alerts", "ai_recommendations", "reports"]:
-                    try:
-                        sub_docs = list(p_ref.collection(sub_col).stream())
-                        for s_doc in sub_docs:
-                            s_doc.reference.delete()
-                    except Exception:
-                        pass
-                p_ref.delete()
+        # Delete subcollections under users/{uid}
+        u_ref = client.collection("users").document(uid)
+        for sub_col in ["medicines", "health", "readings", "alerts", "ai_recommendations", "reports", "patient"]:
+            try:
+                sub_docs = list(u_ref.collection(sub_col).stream())
+                for s_doc in sub_docs:
+                    s_doc.reference.delete()
+            except Exception:
+                pass
+
+        # Clean up legacy patients/{uid} and subcollections if present
+        p_ref = client.collection("patients").document(uid)
+        if p_ref.get().exists:
+            for sub_col in ["medicines", "health", "readings", "alerts", "ai_recommendations", "reports"]:
+                try:
+                    sub_docs = list(p_ref.collection(sub_col).stream())
+                    for s_doc in sub_docs:
+                        s_doc.reference.delete()
+                except Exception:
+                    pass
+            p_ref.delete()
 
         if uid in _ESP32_LIVE_CACHE:
             del _ESP32_LIVE_CACHE[uid]
@@ -328,12 +411,11 @@ def get_patient_by_id(patient_id: Optional[str] = None, owner_uid: Optional[str]
         return None
 
     try:
-        # Check primary path: users/{uid}/patient/profile
+        # Perform automatic legacy migration if data exists under /patients/{uid}
+        _migrate_legacy_patient_data_if_needed(client, uid)
+
+        # Primary path: users/{uid}/patient/profile
         doc = client.collection("users").document(uid).collection("patient").document("profile").get()
-        if not doc.exists:
-            doc = client.collection("users").document(uid).get()
-        if not doc.exists:
-            doc = client.collection("patients").document(uid).get()
         if not doc.exists:
             return None
 
@@ -366,7 +448,7 @@ def process_esp32_data(
     patient_id: Optional[str] = None,
     blood_pressure: Optional[str] = "120/80"
 ) -> Dict[str, Any]:
-    """Process ESP32 vitals reading and save under /users/{uid}/health and update /users/{uid} latest_vitals."""
+    """Process ESP32 vitals reading and save under /users/{uid}/health and update /users/{uid}/patient/profile latest_vitals."""
     uid = _resolve_user_uid(patient_id)
     if not uid:
         return {"success": False, "error": "Authentication / Patient ID required."}
@@ -400,7 +482,6 @@ def process_esp32_data(
             }
             client.collection("users").document(uid).collection("patient").document("profile").set(update_payload, merge=True)
             client.collection("users").document(uid).set(update_payload, merge=True)
-            client.collection("patients").document(uid).set(update_payload, merge=True)
         except Exception:
             pass
 
@@ -417,7 +498,7 @@ def process_esp32_data(
 
 
 def get_health_metrics(patient_id: Optional[str] = None) -> Dict[str, Any]:
-    """Retrieve vitals & health metrics directly for /users/{uid}."""
+    """Retrieve vitals & health metrics directly from /users/{uid}/patient/profile and /users/{uid}/health."""
     uid = _resolve_user_uid(patient_id)
     metrics: Dict[str, Any] = {
         "heart_rate": None,
@@ -467,8 +548,6 @@ def get_health_metrics(patient_id: Optional[str] = None) -> Dict[str, Any]:
     if client:
         try:
             sub_docs = list(client.collection("users").document(uid).collection("health").limit(10).stream())
-            if not sub_docs:
-                sub_docs = list(client.collection("patients").document(uid).collection("health").limit(10).stream())
             if sub_docs:
                 latest_doc = sub_docs[-1].to_dict() or {}
                 extracted = _extract_metrics_from_dict(latest_doc)
@@ -517,8 +596,6 @@ def get_patient_medicines(patient_id: Optional[str] = None) -> List[Dict[str, An
 
     try:
         docs = list(client.collection("users").document(uid).collection("medicines").stream())
-        if not docs:
-            docs = list(client.collection("patients").document(uid).collection("medicines").stream())
         items: List[Dict[str, Any]] = []
         for doc in docs:
             data = doc.to_dict() or {}
@@ -560,7 +637,6 @@ def save_patient_medicine(patient_id: str, medicine_data: Dict[str, Any], medici
 
     try:
         client.collection("users").document(uid).collection("medicines").document(doc_id).set(payload)
-        client.collection("patients").document(uid).collection("medicines").document(doc_id).set(payload)
         invalidate_firebase_cache()
         return doc_id
     except Exception:
@@ -579,7 +655,6 @@ def delete_patient_medicine(patient_id: str, medicine_id: str) -> bool:
 
     try:
         client.collection("users").document(uid).collection("medicines").document(medicine_id).delete()
-        client.collection("patients").document(uid).collection("medicines").document(medicine_id).delete()
         invalidate_firebase_cache()
         return True
     except Exception:
@@ -626,7 +701,6 @@ def save_patient_alert(patient_id: Optional[str], alert_data: Dict[str, Any]) ->
     if client:
         try:
             client.collection("users").document(uid).collection("alerts").document(doc_id).set(payload)
-            client.collection("patients").document(uid).collection("alerts").document(doc_id).set(payload)
             return doc_id
         except Exception:
             pass
@@ -701,8 +775,6 @@ def get_alerts(patient_id: Optional[str] = None) -> List[Dict[str, Any]]:
     if client:
         try:
             docs = list(client.collection("users").document(uid).collection("alerts").stream())
-            if not docs:
-                docs = list(client.collection("patients").document(uid).collection("alerts").stream())
             items = [d.to_dict() for d in docs if d.to_dict()]
             if items:
                 for item in items:
@@ -734,8 +806,6 @@ def get_ai_recommendations(patient_id: Optional[str] = None) -> List[str]:
     if client:
         try:
             docs = list(client.collection("users").document(uid).collection("ai_recommendations").stream())
-            if not docs:
-                docs = list(client.collection("patients").document(uid).collection("ai_recommendations").stream())
             items = [d.to_dict() for d in docs if d.to_dict()]
             if items:
                 recs = [str(item.get("recommendation") or item.get("text") or item.get("message") or "") for item in items if item]
@@ -792,7 +862,6 @@ def save_health_reading(patient_id: str, reading_data: Dict[str, Any]) -> Option
 
     try:
         client.collection("users").document(uid).collection("health").document(doc_id).set(payload)
-        client.collection("patients").document(uid).collection("health").document(doc_id).set(payload)
         return doc_id
     except Exception:
         return None
@@ -811,8 +880,6 @@ def get_patient_health_readings(patient_id: Optional[str] = None) -> List[Dict[s
     readings: List[Dict[str, Any]] = []
     try:
         docs = list(client.collection("users").document(uid).collection("health").stream())
-        if not docs:
-            docs = list(client.collection("patients").document(uid).collection("health").stream())
         for doc in docs:
             data = doc.to_dict() or {}
             data["id"] = doc.id
@@ -949,7 +1016,6 @@ def save_patient_report(patient_id: str, report_metadata: Dict[str, Any]) -> Opt
 
     try:
         client.collection("users").document(uid).collection("reports").document(doc_id).set(payload)
-        client.collection("patients").document(uid).collection("reports").document(doc_id).set(payload)
         invalidate_firebase_cache()
         return doc_id
     except Exception:
@@ -968,8 +1034,6 @@ def get_patient_reports(patient_id: Optional[str] = None) -> List[Dict[str, Any]
 
     try:
         docs = list(client.collection("users").document(uid).collection("reports").stream())
-        if not docs:
-            docs = list(client.collection("patients").document(uid).collection("reports").stream())
         reports: List[Dict[str, Any]] = []
         for doc in docs:
             data = doc.to_dict() or {}
