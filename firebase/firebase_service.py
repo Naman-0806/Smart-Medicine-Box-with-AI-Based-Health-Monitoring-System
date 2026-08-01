@@ -585,7 +585,7 @@ def get_health_metrics(patient_id: Optional[str] = None) -> Dict[str, Any]:
 
 
 def get_patient_medicines(patient_id: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Return medicines exclusively from subcollection /users/{uid}/medicines."""
+    """Return medicines exclusively from subcollection /users/{uid}/medicines (with auto-migration)."""
     uid = _resolve_user_uid(patient_id)
     if not uid:
         return []
@@ -595,7 +595,23 @@ def get_patient_medicines(patient_id: Optional[str] = None) -> List[Dict[str, An
         return []
 
     try:
-        docs = list(client.collection("users").document(uid).collection("medicines").stream())
+        meds_ref = client.collection("users").document(uid).collection("medicines")
+        docs = list(meds_ref.stream())
+
+        # If no medicines found in users/{uid}/medicines, check legacy patients/{uid}/medicines
+        if not docs:
+            legacy_ref = client.collection("patients").document(uid).collection("medicines")
+            legacy_docs = list(legacy_ref.stream())
+            if legacy_docs:
+                for l_doc in legacy_docs:
+                    l_data = l_doc.to_dict() or {}
+                    meds_ref.document(l_doc.id).set(l_data, merge=True)
+                    try:
+                        l_doc.reference.delete()
+                    except Exception:
+                        pass
+                docs = list(meds_ref.stream())
+
         items: List[Dict[str, Any]] = []
         for doc in docs:
             data = doc.to_dict() or {}
@@ -607,7 +623,8 @@ def get_patient_medicines(patient_id: Optional[str] = None) -> List[Dict[str, An
                 "Status": data.get("status") or data.get("Status") or "Upcoming",
             })
         return items
-    except Exception:
+    except Exception as e:
+        print(f"[FIRESTORE ERROR] get_patient_medicines failed: {e}")
         return []
 
 
@@ -619,9 +636,11 @@ def save_patient_medicine(patient_id: str, medicine_data: Dict[str, Any], medici
 
     client = get_firestore_client()
     if client is None:
+        print("[FIRESTORE ERROR] save_patient_medicine failed: Firestore client not initialized.")
         return None
 
     doc_id = medicine_id or f"MED-{uuid.uuid4().hex[:8].upper()}"
+    now_iso = datetime.utcnow().isoformat()
     payload = {
         "id": doc_id,
         "medicine_id": doc_id,
@@ -632,14 +651,16 @@ def save_patient_medicine(patient_id: str, medicine_data: Dict[str, Any], medici
         "dosage": medicine_data.get("Dosage") or medicine_data.get("dosage") or "",
         "time": medicine_data.get("Time") or medicine_data.get("time") or "",
         "status": medicine_data.get("Status") or medicine_data.get("status") or "Upcoming",
-        "updated_at": datetime.utcnow().isoformat(),
+        "created_at": medicine_data.get("created_at") or now_iso,
+        "updated_at": now_iso,
     }
 
     try:
-        client.collection("users").document(uid).collection("medicines").document(doc_id).set(payload)
+        client.collection("users").document(uid).collection("medicines").document(doc_id).set(payload, merge=True)
         invalidate_firebase_cache()
         return doc_id
-    except Exception:
+    except Exception as e:
+        print(f"[FIRESTORE ERROR] save_patient_medicine failed: {e}")
         return None
 
 
@@ -657,7 +678,8 @@ def delete_patient_medicine(patient_id: str, medicine_id: str) -> bool:
         client.collection("users").document(uid).collection("medicines").document(medicine_id).delete()
         invalidate_firebase_cache()
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[FIRESTORE ERROR] delete_patient_medicine failed: {e}")
         return False
 
 
