@@ -1,31 +1,38 @@
 import streamlit as st
 from firebase.auth_service import require_auth
-from firebase.firebase_service import get_dashboard_data
+from firebase.firebase_service import get_dashboard_data, save_ai_recommendation
 from src.ui import apply_theme_styles
 
 
-def _calculate_ai_insights(metrics, medicines):
+def _calculate_ai_insights(metrics, medicines, patient):
+    p_name = (patient or {}).get("name") or (patient or {}).get("full_name") or "Patient"
+    p_doctor = (patient or {}).get("doctor_name") or "Assigned Doctor"
+    p_disease = (patient or {}).get("disease") or (patient or {}).get("existing_diseases") or ""
+
     hr = metrics.get("heart_rate")
     try:
-        hr = float(hr)
+        hr_val = float(hr) if hr is not None else None
     except (TypeError, ValueError):
-        hr = 76.0
+        hr_val = None
 
     spo2 = metrics.get("spo2")
     try:
-        spo2 = float(spo2)
+        spo2_val = float(spo2) if spo2 is not None else None
     except (TypeError, ValueError):
-        spo2 = 97.0
+        spo2_val = None
 
     temp = metrics.get("temperature")
     try:
-        temp = float(temp)
+        temp_val = float(temp) if temp is not None else None
     except (TypeError, ValueError):
-        temp = 36.7
+        temp_val = None
 
     taken_count = 0
     missed_count = 0
+    total_meds = 0
+
     if hasattr(medicines, "iterrows"):
+        total_meds = len(medicines)
         for _, row in medicines.iterrows():
             status = str(row.get("Status", "")).lower()
             if "taken" in status:
@@ -33,6 +40,7 @@ def _calculate_ai_insights(metrics, medicines):
             elif "missed" in status:
                 missed_count += 1
     elif isinstance(medicines, (list, tuple)):
+        total_meds = len(medicines)
         for item in medicines:
             if isinstance(item, dict):
                 status = str(item.get("Status") or item.get("status") or "").lower()
@@ -45,11 +53,11 @@ def _calculate_ai_insights(metrics, medicines):
     adherence_pct = int(round((taken_count / total_past) * 100)) if total_past > 0 else 100
 
     base_score = 100
-    if hr < 60 or hr > 100:
+    if hr_val is not None and (hr_val < 60 or hr_val > 100):
         base_score -= 15
-    if spo2 < 95:
-        base_score -= (95 - int(spo2)) * 5
-    if temp < 36.0 or temp > 37.5:
+    if spo2_val is not None and spo2_val < 95:
+        base_score -= int((95 - spo2_val) * 5)
+    if temp_val is not None and (temp_val < 36.0 or temp_val > 37.5):
         base_score -= 10
     if missed_count > 0:
         base_score -= min(20, missed_count * 8)
@@ -64,40 +72,41 @@ def _calculate_ai_insights(metrics, medicines):
     if health_score >= 80:
         overall_risk = "Low"
         risk_label = "Stable"
-        summary_text = "Patient health metrics indicate stable vital signs and high medication adherence."
+        summary_text = f"Health metrics for {p_name} indicate stable vital signs and high medication adherence."
     elif health_score >= 60:
         overall_risk = "Moderate"
         risk_label = "Monitor"
-        summary_text = "Patient health metrics indicate moderate fluctuations. Regular monitoring is recommended."
+        summary_text = f"Health metrics for {p_name} show moderate vital fluctuations. Regular monitoring is recommended."
     else:
         overall_risk = "High"
         risk_label = "Critical"
-        summary_text = "Attention required. Vital signs or medication adherence require immediate review."
+        summary_text = f"Immediate attention required for {p_name}. Vital signs or medication adherence require urgent review."
 
-    heart_risk = "Normal" if 60 <= hr <= 100 else ("High (Elevated)" if hr > 100 else "Low (Bradycardia)")
-    oxygen_status = "Optimal" if spo2 >= 95 else "Below Threshold (Low SpO2)"
-    temp_status = "Normal" if 36.0 <= temp <= 37.5 else "Abnormal (Fever/Hypothermia)"
+    heart_risk = "Normal" if (hr_val and 60 <= hr_val <= 100) else ("High (Elevated)" if (hr_val and hr_val > 100) else ("Low (Bradycardia)" if hr_val else "Not Recorded"))
+    oxygen_status = "Optimal" if (spo2_val and spo2_val >= 95) else ("Below Threshold (Low SpO2)" if spo2_val else "Not Recorded")
+    temp_status = "Normal" if (temp_val and 36.0 <= temp_val <= 37.5) else ("Abnormal (Fever/Hypothermia)" if temp_val else "Not Recorded")
 
     recs = []
     if missed_count > 0:
-        recs.append(f"• Review missed medication doses ({missed_count}) with your caregiver.")
+        recs.append(f"• Review {missed_count} missed medication dose(s) for {p_name} with {p_doctor}.")
     else:
-        recs.append("• Continue taking prescribed medicines on time.")
+        recs.append(f"• Continue taking all {total_meds} prescribed medication(s) on schedule.")
 
-    if spo2 < 95:
-        recs.append(f"• Monitor oxygen levels closely (current: {spo2}%). Rest in a well-ventilated area.")
+    if spo2_val and spo2_val < 95:
+        recs.append(f"• Oxygen saturation is {spo2_val}%. Ensure proper ventilation and consult {p_doctor} if dyspnea persists.")
     else:
-        recs.append("• Keep a light walking routine daily.")
+        recs.append("• Maintain daily light activity and healthy hydration habits.")
 
-    if hr > 100:
-        recs.append(f"• Heart rate is elevated ({int(hr)} bpm). Avoid strenuous exercise and stay hydrated.")
-    elif hr < 60:
-        recs.append(f"• Heart rate is lower than average ({int(hr)} bpm). Rest comfortably and track symptoms.")
+    if hr_val and hr_val > 100:
+        recs.append(f"• Heart rate is elevated ({int(hr_val)} bpm). Rest in a cool area and limit physical stress.")
+    elif hr_val and hr_val < 60:
+        recs.append(f"• Heart rate is low ({int(hr_val)} bpm). Rest comfortably and monitor for dizziness.")
     else:
-        recs.append("• Stay hydrated and maintain regular sleep.")
+        recs.append("• Maintain regular sleep schedule and stress management.")
 
-    recs.append("• Review medications with your caregiver weekly.")
-    recs.append("• Seek medical advice if symptoms worsen.")
+    if p_disease:
+        recs.append(f"• Follow specialized care guidelines for pre-existing condition: {p_disease}.")
+    recs.append(f"• Routine follow-up scheduled with {p_doctor}.")
 
     return {
         "score": health_score,
@@ -135,10 +144,15 @@ def render_ai():
             st.switch_page("pages/patient.py")
         return
 
+    patient = data.get("patient", {})
     metrics = data.get("metrics", {})
     medicines = data.get("medicines")
 
-    insights = _calculate_ai_insights(metrics, medicines)
+    insights = _calculate_ai_insights(metrics, medicines, patient)
+
+    # Persist generated recommendations to users/{user_uid}/ai_recommendations
+    for rec in insights["recommendations"]:
+        save_ai_recommendation(user_uid, rec)
 
     with st.container(border=True):
         st.subheader("AI Health Summary")

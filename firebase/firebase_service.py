@@ -889,6 +889,34 @@ def get_alerts(patient_id: Optional[str] = None) -> List[Dict[str, Any]]:
     return combined_alerts
 
 
+def save_ai_recommendation(patient_id: Optional[str], recommendation_text: str) -> Optional[str]:
+    """Save an AI recommendation document under /users/{uid}/ai_recommendations/{doc_id}."""
+    uid = _resolve_user_uid(patient_id)
+    if not uid or not recommendation_text:
+        return None
+
+    client = get_firestore_client()
+    if client is None:
+        return None
+
+    doc_id = f"AI-REC-{uuid.uuid4().hex[:8].upper()}"
+    payload = {
+        "id": doc_id,
+        "uid": uid,
+        "patient_id": uid,
+        "recommendation": str(recommendation_text),
+        "text": str(recommendation_text),
+        "created_at": datetime.utcnow().isoformat(),
+    }
+
+    try:
+        client.collection("users").document(uid).collection("ai_recommendations").document(doc_id).set(payload, merge=True)
+        return doc_id
+    except Exception as e:
+        print(f"[FIRESTORE ERROR] save_ai_recommendation failed: {e}")
+        return None
+
+
 def get_ai_recommendations(patient_id: Optional[str] = None) -> List[str]:
     """Return AI recommendations strictly for user from subcollection /users/{uid}/ai_recommendations."""
     uid = _resolve_user_uid(patient_id)

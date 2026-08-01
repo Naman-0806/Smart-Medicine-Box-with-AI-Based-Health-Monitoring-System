@@ -78,7 +78,7 @@ def _render_progress_indicators(health_score, spo2, heart_rate):
 def render_dashboard():
     require_auth()
 
-    st.markdown("# Smart Medicine Box Dashboard", unsafe_allow_html=True)
+    st.markdown("# 🩺 Smart Medicine Box Dashboard", unsafe_allow_html=True)
     st.caption("Live overview of patient wellness, medication activity, and care alerts.")
 
     user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
@@ -86,20 +86,70 @@ def render_dashboard():
     st.session_state["owner_uid"] = user_uid
     st.session_state["user_uid"] = user_uid
 
-    # Fetch dashboard data scoped to user_uid
-    data = get_dashboard_data(user_uid, owner_uid=user_uid) or {}
+    # Fetch dashboard data scoped strictly to authenticated user_uid
+    data = get_dashboard_data(user_uid, owner_uid=user_uid, force_refresh=True) or {}
 
     if data.get("no_patients") or not data.get("patient"):
-        st.warning("📝 No patient profile found. Redirecting to Patient Registration...")
-        st.switch_page("pages/patient.py")
+        st.warning("📝 No patient profile found for your account. Please register your patient profile first.")
+        if st.button("📝 Register Patient Profile", type="primary", use_container_width=True):
+            st.switch_page("pages/patient.py")
         return
 
-    if data.get("offline"):
-        st.warning("Running in Offline Mode")
+    patient = data.get("patient", {}) or {}
+    metrics = data.get("metrics", {}) or {}
+    alerts = _normalize_collection(data.get("alerts", []), [])
+    medicines = data.get("medicines")
+    trends_df = data.get("trends")
 
-    # ESP32 Live Telemetry Ingestion / Simulator Expander
-    with st.expander("📡 ESP32 Device Ingestion & Testing", expanded=False):
-        st.write("Simulate or transmit live ESP32 sensor values (`heart_rate`, `spo2`, `temperature`) directly into Firebase.")
+    # Extract dynamic logged in user metrics
+    patient_name = patient.get("name") or patient.get("full_name") or "N/A"
+
+    # Calculate medicine count and upcoming medicines
+    total_meds_count = 0
+    upcoming_meds_df = pd.DataFrame(columns=["Medicine", "Dosage", "Time", "Status"])
+
+    if isinstance(medicines, pd.DataFrame):
+        total_meds_count = len(medicines)
+        if not medicines.empty and "Status" in medicines.columns:
+            upcoming_meds_df = medicines[medicines["Status"].astype(str).str.lower() == "upcoming"]
+    elif isinstance(medicines, list):
+        total_meds_count = len(medicines)
+        upcoming_items = [m for m in medicines if isinstance(m, dict) and str(m.get("Status") or m.get("status")).lower() == "upcoming"]
+        if upcoming_items:
+            upcoming_meds_df = pd.DataFrame(upcoming_items)
+
+    # Health status calculation
+    score = _safe_number(metrics.get("health_score"), 100)
+    if score >= 80:
+        health_status = "Stable (Good)"
+    elif score >= 60:
+        health_status = "Monitor (Moderate)"
+    else:
+        health_status = "Attention Needed"
+
+    raw_sync = patient.get("last_sync") or metrics.get("updated_at") or "Just Now"
+    last_sync = str(raw_sync).split("T")[0] if "T" in str(raw_sync) else str(raw_sync)
+    battery_level = patient.get("battery_level") if patient.get("battery_level") is not None else metrics.get("battery_level", 90)
+    device_status = patient.get("device_status") or metrics.get("device_status") or "Connected"
+
+    # Display Top Metrics Row (Patient Name, Medicine Count, Health Status, Last Sync, Battery Level)
+    m1, m2, m3, m4, m5 = st.columns(5)
+    with m1:
+        st.metric("Patient Name", patient_name)
+    with m2:
+        st.metric("Total Medicines", str(total_meds_count))
+    with m3:
+        st.metric("Health Status", health_status, f"{int(score)} / 100")
+    with m4:
+        st.metric("Last Sync", last_sync)
+    with m5:
+        st.metric("Battery Level", f"{battery_level}%", device_status)
+
+    st.divider()
+
+    # ESP32 Device Testing Expander
+    with st.expander("📡 ESP32 Live Device Telemetry", expanded=False):
+        st.write("Transmit live ESP32 vitals directly to Cloud Firestore under `users/{uid}/health/latest`.")
         e_c1, e_c2, e_c3, e_c4 = st.columns(4)
         with e_c1:
             in_hr = st.number_input("Heart Rate (bpm)", min_value=30.0, max_value=220.0, value=75.0, step=1.0)
@@ -109,26 +159,19 @@ def render_dashboard():
             in_temp = st.number_input("Temperature (°C)", min_value=30.0, max_value=45.0, value=36.8, step=0.1)
         with e_c4:
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("📡 Send ESP32 Reading", use_container_width=True):
+            if st.button("📡 Transmit Telemetry", use_container_width=True):
                 res = process_esp32_data(in_hr, in_spo2, in_temp, patient_id=user_uid)
                 if res.get("success"):
-                    st.success(f"ESP32 Vitals saved to Firebase! (Reading ID: {res.get('reading_id')})")
+                    st.success(f"Vitals saved to Firestore! (Reading ID: {res.get('reading_id')})")
                     st.rerun()
                 else:
-                    st.error("Failed to transmit ESP32 reading.")
+                    st.error("Failed to transmit reading.")
 
     st.markdown("<div style='margin-bottom: 0.5rem;'></div>", unsafe_allow_html=True)
-
-    patient = data.get("patient", {}) or {}
-    metrics = data.get("metrics", {}) or {}
-    alerts = _normalize_collection(data.get("alerts", []), [])
-    medicines = _normalize_collection(data.get("medicines", []), [])
-    trends_df = data.get("trends")
 
     heart_rate = _safe_number(metrics.get("heart_rate"), 0)
     spo2 = _safe_number(metrics.get("spo2"), 0)
     temperature = _safe_number(metrics.get("temperature"), 0)
-    health_score = _safe_number(metrics.get("health_score"), 0)
 
     left_col, right_col = st.columns([1.08, 1.92], gap="large")
     with left_col:
@@ -163,7 +206,7 @@ def render_dashboard():
         else:
             with st.container(border=True):
                 st.markdown("<div class='section-title'>Vital Trend</div>", unsafe_allow_html=True)
-                st.caption("No vital telemetry readings recorded yet for this patient.")
+                st.caption("No vital telemetry readings recorded yet in Firestore.")
 
         st.write("")
         col_a, col_b = st.columns([1, 1], gap="small")
@@ -171,7 +214,7 @@ def render_dashboard():
             bar_df = pd.DataFrame(
                 {
                     "Metric": ["Heart Rate", "SpO₂", "Temperature", "Health Score"],
-                    "Value": [heart_rate, spo2, temperature, health_score],
+                    "Value": [heart_rate, spo2, temperature, score],
                 }
             )
             bar_chart = (
@@ -191,7 +234,7 @@ def render_dashboard():
             pie_df = pd.DataFrame(
                 {
                     "Category": ["Health Score", "Alerts", "Medicines"],
-                    "Count": [int(health_score), len(alerts), len(medicines)],
+                    "Count": [int(score), len(alerts), total_meds_count],
                 }
             )
             pie_chart = (
@@ -208,31 +251,18 @@ def render_dashboard():
             _render_chart_card("Care Distribution", pie_chart)
 
         st.write("")
-        if isinstance(trends_df, pd.DataFrame) and not trends_df.empty:
-            area_chart = (
-                alt.Chart(trends_df)
-                .mark_area(line=True, color="#93c5fd", opacity=0.45)
-                .encode(
-                    x=alt.X("time", title="Time"),
-                    y=alt.Y("health_score", title="Score"),
-                    tooltip=["time", "health_score"],
-                )
-                .configure_view(fill='transparent')
-                .properties(height=220)
-            )
-            _render_chart_card("Wellness Area", area_chart)
-        else:
-            with st.container(border=True):
-                st.markdown("<div class='section-title'>Wellness Area</div>", unsafe_allow_html=True)
-                st.caption("No wellness history recorded yet for this patient.")
-
-        st.write("")
-        _render_progress_indicators(health_score, spo2, heart_rate)
+        _render_progress_indicators(score, spo2, heart_rate)
 
         st.write("")
         with st.container(border=True):
-            st.markdown("<div class='section-title'>Medicine Summary</div>", unsafe_allow_html=True)
-            medicine_table(medicines)
+            st.markdown("<div class='section-title'>💊 Upcoming Medicines</div>", unsafe_allow_html=True)
+            if not upcoming_meds_df.empty:
+                medicine_table(upcoming_meds_df)
+            elif isinstance(medicines, pd.DataFrame) and not medicines.empty:
+                st.caption("No medicines with 'Upcoming' status. Displaying all scheduled medications:")
+                medicine_table(medicines)
+            else:
+                st.info("No medicine schedule recorded in Firestore.")
 
 
 render_dashboard()

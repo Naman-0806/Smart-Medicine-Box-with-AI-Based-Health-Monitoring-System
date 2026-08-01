@@ -2,7 +2,6 @@ import pandas as pd
 import streamlit as st
 from firebase.auth_service import require_auth
 from firebase.firebase_service import (
-    get_all_patients,
     get_dashboard_data,
     get_patient_by_id,
     get_patient_reports,
@@ -17,7 +16,7 @@ def render_reports():
     apply_theme_styles()
 
     st.markdown("# 📊 Patient Health & Activity Reports")
-    st.caption("Generate, save, and export comprehensive clinical reports for your selected patient.")
+    st.caption("Generate, save, and export comprehensive clinical reports from your Cloud Firestore health data.")
     st.divider()
 
     user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
@@ -26,7 +25,7 @@ def render_reports():
     st.session_state["owner_uid"] = user_uid
     st.session_state["user_uid"] = user_uid
 
-    patient = get_patient_by_id(user_uid)
+    patient = get_patient_by_id(user_uid, force_refresh=True)
     if not patient:
         st.warning("📝 No patient profile registered yet. Please register your patient profile first.")
         if st.button("📝 Register Patient Profile", type="primary", use_container_width=True):
@@ -38,8 +37,8 @@ def render_reports():
     if st.button("🔄 Refresh Data"):
         st.rerun()
 
-    # Fetch live Firebase data strictly for selected patient
-    data = get_dashboard_data(selected_patient_id, owner_uid=user_uid)
+    # Fetch live Cloud Firestore data strictly for authenticated logged-in user
+    data = get_dashboard_data(user_uid, owner_uid=user_uid, force_refresh=True)
     patient = data.get("patient", {})
     metrics = data.get("metrics", {})
     medicines = data.get("medicines", [])
@@ -47,14 +46,14 @@ def render_reports():
     alerts = data.get("alerts", [])
     ai_recs = data.get("ai", [])
 
-    st.markdown("### 👤 Selected Patient Overview")
+    st.markdown("### 👤 Logged In Patient Overview")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Patient Name", patient.get("name") or patient.get("full_name") or "N/A")
     with col2:
-        st.metric("Patient ID", patient.get("patient_id") or selected_patient_id or "N/A")
+        st.metric("Patient ID", patient.get("patient_id") or user_uid or "N/A")
     with col3:
-        st.metric("Age / Gender", f"{patient.get('age', 'N/A')} / {patient.get('gender', 'N/A')}")
+        st.metric("Age / Gender", f"{patient.get('age', 'N/A')} yrs / {patient.get('gender', 'N/A')}")
     with col4:
         st.metric("Assigned Doctor", patient.get("doctor_name", "N/A"))
 
@@ -77,12 +76,12 @@ def render_reports():
         c4.metric("Blood Pressure", f"{metrics.get('blood_pressure', 'N/A')}")
 
     with tab2:
-        if isinstance(medicines, pd.DataFrame):
+        if isinstance(medicines, pd.DataFrame) and not medicines.empty:
             st.dataframe(medicines, use_container_width=True, hide_index=True)
         elif isinstance(medicines, list) and medicines:
             st.dataframe(pd.DataFrame(medicines), use_container_width=True, hide_index=True)
         else:
-            st.info("No medicine schedule records available.")
+            st.info("No medication records found in Firestore for your account.")
 
     with tab3:
         st.subheader("Recent Alerts")
@@ -106,11 +105,11 @@ def render_reports():
         if isinstance(trends, pd.DataFrame) and not trends.empty:
             st.dataframe(trends, use_container_width=True, hide_index=True)
         else:
-            st.info("No historical health trends available.")
+            st.info("No historical health trends recorded in Firestore.")
 
     with tab5:
-        st.subheader("📜 Saved Reports for this Patient")
-        saved_reports = get_patient_reports(selected_patient_id)
+        st.subheader("📜 Saved Reports for Your Account")
+        saved_reports = get_patient_reports(user_uid)
         if saved_reports:
             rpt_rows = []
             for r in saved_reports:
@@ -123,12 +122,12 @@ def render_reports():
                 })
             st.dataframe(pd.DataFrame(rpt_rows), use_container_width=True, hide_index=True)
         else:
-            st.info("No saved reports found under subcollection `users/{userId}/reports` for this patient.")
+            st.info("No saved reports found under `users/{userId}/reports` for your account.")
 
     st.divider()
-    st.markdown("### 📥 Download & Save Patient Report")
+    st.markdown("### 📥 Download & Save Clinical Report")
 
-    p_id_str = patient.get("patient_id") or selected_patient_id or "patient"
+    p_id_str = patient.get("patient_id") or user_uid or "patient"
     pdf_bytes = generate_pdf_report(data)
     html_str = generate_html_report(data)
 
@@ -143,7 +142,7 @@ def render_reports():
             type="primary",
             key="dl_pdf_btn",
         ):
-            save_patient_report(selected_patient_id, {
+            save_patient_report(user_uid, {
                 "report_type": "PDF",
                 "file_name": f"patient_report_{p_id_str}.pdf",
                 "health_score": metrics.get("health_score"),
@@ -159,7 +158,7 @@ def render_reports():
             use_container_width=True,
             key="dl_html_btn",
         ):
-            save_patient_report(selected_patient_id, {
+            save_patient_report(user_uid, {
                 "report_type": "HTML",
                 "file_name": f"patient_report_{p_id_str}.html",
                 "health_score": metrics.get("health_score"),
