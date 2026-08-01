@@ -98,6 +98,62 @@ def _migrate_legacy_patient_data_if_needed(client: Any, uid: str) -> None:
         print(f"[FIRESTORE MIGRATION ERROR] Automatic migration failed for '{uid}': {e}")
 
 
+def save_latest_health_vitals(patient_id: str, vitals_data: Dict[str, Any]) -> bool:
+    """Save Heart Rate, Temperature, SpO2, Battery, Device Status directly under /users/{uid}/health/latest in Cloud Firestore."""
+    uid = _resolve_user_uid(patient_id)
+    if not uid or not isinstance(vitals_data, dict):
+        return False
+
+    client = get_firestore_client()
+    if client is None:
+        print("[FIRESTORE ERROR] save_latest_health_vitals failed: Firestore client not initialized.")
+        return False
+
+    now_iso = datetime.utcnow().isoformat()
+    patient = get_patient_by_id(uid) or {}
+
+    hr = vitals_data.get("heart_rate") or vitals_data.get("heartRate") or vitals_data.get("hr") or 72
+    temp = vitals_data.get("temperature") or vitals_data.get("temp") or 36.8
+    spo2 = vitals_data.get("spo2") or vitals_data.get("spO2") or 98
+    battery = vitals_data.get("battery") if vitals_data.get("battery") is not None else vitals_data.get("battery_level", patient.get("battery_level", 90))
+    device_status = vitals_data.get("device_status") or vitals_data.get("status") or patient.get("device_status", "Connected")
+
+    latest_payload = {
+        "uid": uid,
+        "patient_id": uid,
+        "owner_uid": uid,
+        "heart_rate": float(hr),
+        "temperature": float(temp),
+        "spo2": float(spo2),
+        "battery": int(battery),
+        "battery_level": int(battery),
+        "device_status": str(device_status),
+        "updated_at": now_iso,
+        "timestamp": now_iso,
+    }
+
+    try:
+        latest_ref = client.collection("users").document(uid).collection("health").document("latest")
+        latest_ref.set(latest_payload, merge=True)
+
+        # Mirror update to profile document
+        client.collection("users").document(uid).collection("patient").document("profile").set({
+            "latest_vitals": latest_payload,
+            "heart_rate": float(hr),
+            "temperature": float(temp),
+            "spo2": float(spo2),
+            "battery_level": int(battery),
+            "device_status": str(device_status),
+            "last_sync": now_iso,
+        }, merge=True)
+
+        invalidate_firebase_cache()
+        return True
+    except Exception as e:
+        print(f"[FIRESTORE ERROR] save_latest_health_vitals failed: {e}")
+        return False
+
+
 def validate_patient_input(patient_data: Dict[str, Any]) -> Tuple[bool, str]:
     """Validate patient registration & profile input data strictly."""
     name = str(patient_data.get("name") or patient_data.get("full_name") or "").strip()
@@ -231,6 +287,15 @@ def save_patient_registration(patient_data: Dict[str, Any], owner_uid: Optional[
 
         # Perform Firestore write strictly to users/{uid}/patient/profile
         profile_ref.set(payload, merge=True)
+
+        # Initialize users/{uid}/health/latest document
+        save_latest_health_vitals(uid, {
+            "heart_rate": 72.0,
+            "temperature": 36.8,
+            "spo2": 98.0,
+            "battery": payload["battery_level"],
+            "device_status": payload["device_status"]
+        })
 
         # Update root user metadata document under users/{uid}
         try:
@@ -392,7 +457,7 @@ def get_all_patients(owner_uid: Optional[str] = None, force_refresh: bool = Fals
 
 
 def get_patient_by_id(patient_id: Optional[str] = None, owner_uid: Optional[str] = None, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
-    """Retrieve patient profile document directly from /users/{uid}/patient/profile."""
+    """Retrieve patient profile document directly from /users/{uid}/patient/profile with live /users/{uid}/health/latest merge."""
     uid = _resolve_user_uid(patient_id or owner_uid)
     if not uid:
         return None
@@ -425,6 +490,23 @@ def get_patient_by_id(patient_id: Optional[str] = None, owner_uid: Optional[str]
         data.setdefault("uid", uid)
         data.setdefault("ownerUid", uid)
         data.setdefault("owner_uid", uid)
+
+        # Load live /users/{uid}/health/latest for Heart Rate, Temp, SpO2, Battery, Device Status
+        try:
+            latest_doc = client.collection("users").document(uid).collection("health").document("latest").get()
+            if latest_doc.exists:
+                l_data = latest_doc.to_dict() or {}
+                if l_data.get("device_status"):
+                    data["device_status"] = l_data["device_status"]
+                if l_data.get("battery_level") is not None:
+                    data["battery_level"] = l_data["battery_level"]
+                elif l_data.get("battery") is not None:
+                    data["battery_level"] = l_data["battery"]
+                if l_data.get("updated_at") or l_data.get("timestamp"):
+                    data["last_sync"] = l_data.get("updated_at") or l_data.get("timestamp")
+        except Exception:
+            pass
+
         data.setdefault("device_status", "Connected")
         data.setdefault("battery_level", 85)
         data.setdefault("last_sync", data.get("created_at") or (datetime.now() - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"))
@@ -448,7 +530,7 @@ def process_esp32_data(
     patient_id: Optional[str] = None,
     blood_pressure: Optional[str] = "120/80"
 ) -> Dict[str, Any]:
-    """Process ESP32 vitals reading and save under /users/{uid}/health and update /users/{uid}/patient/profile latest_vitals."""
+    """Process ESP32 vitals reading and save under /users/{uid}/health/latest and /users/{uid}/health/{reading_id}."""
     uid = _resolve_user_uid(patient_id)
     if not uid:
         return {"success": False, "error": "Authentication / Patient ID required."}
@@ -462,28 +544,16 @@ def process_esp32_data(
         "spo2": float(spo2),
         "temperature": float(temperature),
         "blood_pressure": blood_pressure or "120/80",
+        "battery_level": 90,
+        "battery": 90,
+        "device_status": "Connected",
         "timestamp": now_iso,
         "source": "ESP32_Device"
     }
 
     _ESP32_LIVE_CACHE[uid] = reading_payload
     doc_id = save_health_reading(uid, reading_payload)
-
-    client = get_firestore_client()
-    if client and uid:
-        try:
-            update_payload = {
-                "latest_vitals": reading_payload,
-                "heart_rate": float(heart_rate),
-                "spo2": float(spo2),
-                "temperature": float(temperature),
-                "blood_pressure": blood_pressure or "120/80",
-                "last_sync": now_iso
-            }
-            client.collection("users").document(uid).collection("patient").document("profile").set(update_payload, merge=True)
-            client.collection("users").document(uid).set(update_payload, merge=True)
-        except Exception:
-            pass
+    save_latest_health_vitals(uid, reading_payload)
 
     alerts = check_and_trigger_vitals_alerts(uid, reading_payload)
     invalidate_firebase_cache()
@@ -498,7 +568,7 @@ def process_esp32_data(
 
 
 def get_health_metrics(patient_id: Optional[str] = None) -> Dict[str, Any]:
-    """Retrieve vitals & health metrics directly from /users/{uid}/patient/profile and /users/{uid}/health."""
+    """Retrieve vitals & health metrics directly from /users/{uid}/health/latest and /users/{uid}/patient/profile."""
     uid = _resolve_user_uid(patient_id)
     metrics: Dict[str, Any] = {
         "heart_rate": None,
@@ -506,81 +576,82 @@ def get_health_metrics(patient_id: Optional[str] = None) -> Dict[str, Any]:
         "temperature": None,
         "blood_pressure": None,
         "health_score": None,
+        "battery_level": None,
+        "battery": None,
+        "device_status": None,
     }
 
     if not uid:
         return metrics
 
-    def _extract_metrics_from_dict(source: Dict[str, Any]) -> Dict[str, Any]:
-        extracted = {}
-        hr = source.get("heart_rate") or source.get("heartRate") or source.get("bpm") or source.get("hr")
-        if hr is not None:
-            extracted["heart_rate"] = hr
-
-        spo2 = source.get("spo2") or source.get("spO2") or source.get("SPO2") or source.get("oxygen_saturation") or source.get("oxygen")
-        if spo2 is not None:
-            extracted["spo2"] = spo2
-
-        temp = source.get("temperature") or source.get("temp") or source.get("body_temperature")
-        if temp is not None:
-            extracted["temperature"] = temp
-
-        bp = source.get("blood_pressure") or source.get("bloodPressure") or source.get("bp")
-        if bp is not None:
-            extracted["blood_pressure"] = bp
-
-        score = source.get("health_score") or source.get("healthScore") or source.get("score")
-        if score is not None:
-            extracted["health_score"] = score
-
-        return extracted
-
-    if uid in _ESP32_LIVE_CACHE:
-        metrics.update(_extract_metrics_from_dict(_ESP32_LIVE_CACHE[uid]))
-
-    patient = get_patient_by_id(uid)
-    if patient:
-        metrics.update(_extract_metrics_from_dict(patient))
-        if "latest_vitals" in patient and isinstance(patient["latest_vitals"], dict):
-            metrics.update(_extract_metrics_from_dict(patient["latest_vitals"]))
-
     client = get_firestore_client()
     if client:
         try:
-            sub_docs = list(client.collection("users").document(uid).collection("health").limit(10).stream())
-            if sub_docs:
-                latest_doc = sub_docs[-1].to_dict() or {}
-                extracted = _extract_metrics_from_dict(latest_doc)
-                for k, v in extracted.items():
-                    metrics.setdefault(k, v)
+            latest_doc = client.collection("users").document(uid).collection("health").document("latest").get()
+            if latest_doc.exists:
+                l_data = latest_doc.to_dict() or {}
+                for k in ["heart_rate", "spo2", "temperature", "blood_pressure", "battery", "battery_level", "device_status"]:
+                    if l_data.get(k) is not None:
+                        metrics[k] = l_data.get(k)
         except Exception:
             pass
 
-    if any(metrics.get(k) is not None for k in ["heart_rate", "spo2", "temperature"]):
-        score = 100
-        try:
-            hr = float(metrics.get("heart_rate")) if metrics.get("heart_rate") is not None else 75.0
-            if hr > 100 or hr < 60:
-                score -= 15
-        except (TypeError, ValueError):
-            pass
+    patient = get_patient_by_id(uid)
+    if patient:
+        for k in ["heart_rate", "spo2", "temperature", "blood_pressure", "battery_level", "device_status"]:
+            if metrics.get(k) is None and patient.get(k) is not None:
+                metrics[k] = patient.get(k)
+        if "latest_vitals" in patient and isinstance(patient["latest_vitals"], dict):
+            lv = patient["latest_vitals"]
+            for k in ["heart_rate", "spo2", "temperature", "blood_pressure", "battery", "battery_level", "device_status"]:
+                if metrics.get(k) is None and lv.get(k) is not None:
+                    metrics[k] = lv.get(k)
 
-        try:
-            spo2 = float(metrics.get("spo2")) if metrics.get("spo2") is not None else 98.0
-            if spo2 < 95:
-                score -= int((95 - spo2) * 5)
-        except (TypeError, ValueError):
-            pass
+    if uid in _ESP32_LIVE_CACHE:
+        cache_data = _ESP32_LIVE_CACHE[uid]
+        for k in ["heart_rate", "spo2", "temperature", "blood_pressure", "battery", "battery_level", "device_status"]:
+            if cache_data.get(k) is not None:
+                metrics[k] = cache_data.get(k)
 
-        try:
-            temp = float(metrics.get("temperature")) if metrics.get("temperature") is not None else 36.8
-            if temp > 37.5 or temp < 36.0:
-                score -= 10
-        except (TypeError, ValueError):
-            pass
+    # Defaults if still None
+    if metrics["heart_rate"] is None:
+        metrics["heart_rate"] = 72.0
+    if metrics["spo2"] is None:
+        metrics["spo2"] = 98.0
+    if metrics["temperature"] is None:
+        metrics["temperature"] = 36.8
+    if metrics["blood_pressure"] is None:
+        metrics["blood_pressure"] = "120/80"
+    if metrics["battery_level"] is None:
+        metrics["battery_level"] = metrics.get("battery") or 90
+    if metrics["battery"] is None:
+        metrics["battery"] = metrics.get("battery_level") or 90
+    if metrics["device_status"] is None:
+        metrics["device_status"] = "Connected"
 
-        metrics["health_score"] = max(0, min(100, score))
+    score = 100
+    try:
+        hr = float(metrics.get("heart_rate"))
+        if hr > 100 or hr < 60:
+            score -= 15
+    except (TypeError, ValueError):
+        pass
 
+    try:
+        spo2 = float(metrics.get("spo2"))
+        if spo2 < 95:
+            score -= int((95 - spo2) * 5)
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        temp = float(metrics.get("temperature"))
+        if temp > 37.5 or temp < 36.0:
+            score -= 10
+    except (TypeError, ValueError):
+        pass
+
+    metrics["health_score"] = max(0, min(100, score))
     return metrics
 
 
@@ -857,7 +928,7 @@ def get_ai_recommendations(patient_id: Optional[str] = None) -> List[str]:
 
 
 def save_health_reading(patient_id: str, reading_data: Dict[str, Any]) -> Optional[str]:
-    """Store health reading under /users/{uid}/health/{doc_id}."""
+    """Store health reading under /users/{uid}/health/{doc_id} and update /users/{uid}/health/latest."""
     uid = _resolve_user_uid(patient_id)
     if not uid or not isinstance(reading_data, dict):
         return None
@@ -878,12 +949,16 @@ def save_health_reading(patient_id: str, reading_data: Dict[str, Any]) -> Option
         "spo2": reading_data.get("spo2") or reading_data.get("spO2"),
         "temperature": reading_data.get("temperature") or reading_data.get("temp"),
         "blood_pressure": reading_data.get("blood_pressure") or reading_data.get("bloodPressure") or reading_data.get("bp"),
+        "battery_level": reading_data.get("battery_level") or reading_data.get("battery") or 90,
+        "battery": reading_data.get("battery") or reading_data.get("battery_level") or 90,
+        "device_status": reading_data.get("device_status") or "Connected",
         "health_score": reading_data.get("health_score") or reading_data.get("healthScore"),
         "timestamp": timestamp,
     }
 
     try:
         client.collection("users").document(uid).collection("health").document(doc_id).set(payload)
+        save_latest_health_vitals(uid, payload)
         return doc_id
     except Exception:
         return None
@@ -903,6 +978,8 @@ def get_patient_health_readings(patient_id: Optional[str] = None) -> List[Dict[s
     try:
         docs = list(client.collection("users").document(uid).collection("health").stream())
         for doc in docs:
+            if doc.id == "latest":
+                continue
             data = doc.to_dict() or {}
             data["id"] = doc.id
             readings.append(data)
