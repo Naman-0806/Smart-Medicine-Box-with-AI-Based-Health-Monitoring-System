@@ -71,16 +71,20 @@ def render_medicines():
                 if not medicine_name.strip():
                     st.error("Medicine Name cannot be empty.")
                 else:
-                    med_payload = {
-                        "Medicine": medicine_name.strip(),
-                        "Dosage": dosage.strip(),
-                        "Time": time_value.strip(),
-                        "Status": status_value,
-                    }
-                    save_patient_medicine(selected_patient_id, med_payload)
-                    st.session_state["medicine_df"] = _get_medicine_frame(selected_patient_id)
-                    st.success(f"Medicine '{medicine_name}' saved directly to Firebase!")
-                    st.rerun()
+                    try:
+                        med_payload = {
+                            "Medicine": medicine_name.strip(),
+                            "Dosage": dosage.strip(),
+                            "Time": time_value.strip(),
+                            "Status": status_value,
+                        }
+                        with st.spinner("Saving medication to Cloud Firestore..."):
+                            save_patient_medicine(selected_patient_id, med_payload)
+                            st.session_state["medicine_df"] = _get_medicine_frame(selected_patient_id)
+                        st.success(f"Medicine '{medicine_name}' saved directly to Firebase!")
+                        st.rerun()
+                    except Exception as ex:
+                        st.error(f"Failed to save medicine: {str(ex)}")
 
     edit_index = st.session_state.get("medicine_edit_index")
     if edit_index is not None and edit_index < len(medicine_df):
@@ -105,18 +109,22 @@ def render_medicines():
                     if not edited_name.strip():
                         st.error("Medicine Name cannot be empty.")
                     else:
-                        med_payload = {
-                            "Medicine": edited_name.strip(),
-                            "Dosage": edited_dosage.strip(),
-                            "Time": edited_time.strip(),
-                            "Status": edited_status,
-                        }
-                        med_id = str(row.get("id")) if row.get("id") else None
-                        save_patient_medicine(selected_patient_id, med_payload, medicine_id=med_id)
-                        st.session_state["medicine_df"] = _get_medicine_frame(selected_patient_id)
-                        st.session_state["medicine_edit_index"] = None
-                        st.success("Medication updated in Firebase.")
-                        st.rerun()
+                        try:
+                            med_payload = {
+                                "Medicine": edited_name.strip(),
+                                "Dosage": edited_dosage.strip(),
+                                "Time": edited_time.strip(),
+                                "Status": edited_status,
+                            }
+                            med_id = str(row.get("id")) if row.get("id") else None
+                            with st.spinner("Updating medication in Cloud Firestore..."):
+                                save_patient_medicine(selected_patient_id, med_payload, medicine_id=med_id)
+                                st.session_state["medicine_df"] = _get_medicine_frame(selected_patient_id)
+                                st.session_state["medicine_edit_index"] = None
+                            st.success("Medication updated in Firebase.")
+                            st.rerun()
+                        except Exception as ex:
+                            st.error(f"Failed to update medicine: {str(ex)}")
                 elif cancel_clicked:
                     st.session_state["medicine_edit_index"] = None
                     st.rerun()
@@ -156,13 +164,17 @@ def render_medicines():
                         st.rerun()
                 with c4:
                     if st.button("Delete", key=f"del_med_{index}"):
-                        med_id = str(row.get("id")) if row.get("id") else None
-                        if med_id:
-                            delete_patient_medicine(selected_patient_id, med_id)
-                        st.session_state["medicine_df"] = _get_medicine_frame(selected_patient_id)
-                        st.session_state["medicine_edit_index"] = None
-                        st.success("Medicine deleted from Firebase.")
-                        st.rerun()
+                        try:
+                            med_id = str(row.get("id")) if row.get("id") else None
+                            if med_id:
+                                with st.spinner("Deleting medication from Cloud Firestore..."):
+                                    delete_patient_medicine(selected_patient_id, med_id)
+                            st.session_state["medicine_df"] = _get_medicine_frame(selected_patient_id)
+                            st.session_state["medicine_edit_index"] = None
+                            st.success("Medicine deleted from Firebase.")
+                            st.rerun()
+                        except Exception as ex:
+                            st.error(f"Failed to delete medicine: {str(ex)}")
 
 
 render_medicines()

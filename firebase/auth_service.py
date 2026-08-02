@@ -56,14 +56,24 @@ def _firebase_rest_auth(endpoint: str, payload: dict) -> Tuple[bool, dict, str]:
         print(f"[FIREBASE AUTH ERROR] Endpoint: {endpoint} | Status: {response.status_code} | Exact Firebase Error: {response.text}")
         return False, res_data if isinstance(res_data, dict) else {}, err_msg_code
 
+    except requests.exceptions.Timeout:
+        print(f"[FIREBASE AUTH ERROR] Endpoint: {endpoint} | Network Timeout")
+        return False, {}, "NETWORK_TIMEOUT"
+    except requests.exceptions.ConnectionError:
+        print(f"[FIREBASE AUTH ERROR] Endpoint: {endpoint} | Connection Error")
+        return False, {}, "CONNECTION_ERROR"
     except Exception as e:
         print(f"[FIREBASE AUTH EXCEPTION] Endpoint: {endpoint} | Exception: {type(e).__name__}: {e}")
-        return False, {}, str(e)
+        return False, {}, f"NETWORK_ERROR_{type(e).__name__}"
 
 
 def _map_firebase_error(err_code: str, mode: str = "login") -> str:
     """Map Firebase Auth error string codes to clear user-facing messages."""
     err_upper = err_code.upper()
+    if "NETWORK_TIMEOUT" in err_upper or "TIMEOUT" in err_upper:
+        return "Connection timed out. Please check your internet connection and try again."
+    if "CONNECTION_ERROR" in err_upper or "NETWORK_ERROR" in err_upper:
+        return "Unable to connect to authentication server. Please verify your internet connection."
     if "EMAIL_EXISTS" in err_upper:
         return "An account with this email address already exists."
     if "INVALID_EMAIL" in err_upper:
@@ -273,12 +283,16 @@ def render_login_page():
                 submitted_login = st.form_submit_button("Log In", type="primary")
 
                 if submitted_login:
-                    success, msg = login_user(login_id, login_pwd)
-                    if success:
-                        st.success(msg)
-                        st.switch_page("pages/dashboard.py")
-                    else:
-                        st.error(msg)
+                    try:
+                        with st.spinner("Authenticating with Firebase..."):
+                            success, msg = login_user(login_id, login_pwd)
+                        if success:
+                            st.success(msg)
+                            st.switch_page("pages/dashboard.py")
+                        else:
+                            st.error(msg)
+                    except Exception as e:
+                        st.error(f"Authentication error: {str(e)}")
 
         with tab_signup:
             st.subheader("Register a New Account")
@@ -291,18 +305,22 @@ def render_login_page():
                 submitted_signup = st.form_submit_button("Create Account", type="primary")
 
                 if submitted_signup:
-                    success, msg = signup_user(
-                        email=su_email,
-                        password=su_pwd,
-                        confirm_password=su_pwd2,
-                        full_name=su_name,
-                        phone_number=su_phone,
-                    )
-                    if success:
-                        st.success(msg)
-                        st.switch_page("pages/dashboard.py")
-                    else:
-                        st.error(msg)
+                    try:
+                        with st.spinner("Creating your Firebase account..."):
+                            success, msg = signup_user(
+                                email=su_email,
+                                password=su_pwd,
+                                confirm_password=su_pwd2,
+                                full_name=su_name,
+                                phone_number=su_phone,
+                            )
+                        if success:
+                            st.success(msg)
+                            st.switch_page("pages/dashboard.py")
+                        else:
+                            st.error(msg)
+                    except Exception as e:
+                        st.error(f"Registration error: {str(e)}")
 
 
 def require_auth():

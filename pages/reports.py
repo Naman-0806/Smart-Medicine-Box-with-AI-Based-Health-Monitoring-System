@@ -128,8 +128,13 @@ def render_reports():
     st.markdown("### 📥 Download & Save Clinical Report")
 
     p_id_str = patient.get("patient_id") or user_uid or "patient"
-    pdf_bytes = generate_pdf_report(data)
-    html_str = generate_html_report(data)
+    try:
+        pdf_bytes = generate_pdf_report(data)
+        html_str = generate_html_report(data)
+    except Exception as ex:
+        st.error(f"Error generating clinical report: {str(ex)}")
+        pdf_bytes = b""
+        html_str = ""
 
     exp_col1, exp_col2 = st.columns(2)
     with exp_col1:
@@ -142,12 +147,17 @@ def render_reports():
             type="primary",
             key="dl_pdf_btn",
         ):
-            save_patient_report(user_uid, {
-                "report_type": "PDF",
-                "file_name": f"patient_report_{p_id_str}.pdf",
-                "health_score": metrics.get("health_score"),
-                "generated_by": user_uid,
-            })
+            try:
+                with st.spinner("Saving PDF report metadata to Cloud Firestore..."):
+                    save_patient_report(user_uid, {
+                        "report_type": "PDF",
+                        "file_name": f"patient_report_{p_id_str}.pdf",
+                        "health_score": metrics.get("health_score"),
+                        "generated_by": user_uid,
+                    })
+                st.success("PDF Report record saved to Cloud Firestore.")
+            except Exception as ex:
+                st.error(f"Failed to save report record: {str(ex)}")
 
     with exp_col2:
         if st.download_button(
@@ -158,12 +168,17 @@ def render_reports():
             use_container_width=True,
             key="dl_html_btn",
         ):
-            save_patient_report(user_uid, {
-                "report_type": "HTML",
-                "file_name": f"patient_report_{p_id_str}.html",
-                "health_score": metrics.get("health_score"),
-                "generated_by": user_uid,
-            })
+            try:
+                with st.spinner("Saving HTML report metadata to Cloud Firestore..."):
+                    save_patient_report(user_uid, {
+                        "report_type": "HTML",
+                        "file_name": f"patient_report_{p_id_str}.html",
+                        "health_score": metrics.get("health_score"),
+                        "generated_by": user_uid,
+                    })
+                st.success("HTML Report record saved to Cloud Firestore.")
+            except Exception as ex:
+                st.error(f"Failed to save report record: {str(ex)}")
 
 
 render_reports()

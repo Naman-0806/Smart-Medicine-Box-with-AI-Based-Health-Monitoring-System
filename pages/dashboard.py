@@ -160,12 +160,16 @@ def render_dashboard():
         with e_c4:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("📡 Transmit Telemetry", use_container_width=True):
-                res = process_esp32_data(in_hr, in_spo2, in_temp, patient_id=user_uid)
-                if res.get("success"):
-                    st.success(f"Vitals saved to Firestore! (Reading ID: {res.get('reading_id')})")
-                    st.rerun()
-                else:
-                    st.error("Failed to transmit reading.")
+                try:
+                    with st.spinner("Transmitting telemetry to Cloud Firestore..."):
+                        res = process_esp32_data(in_hr, in_spo2, in_temp, patient_id=user_uid)
+                    if res.get("success"):
+                        st.success(f"Vitals saved to Firestore! (Reading ID: {res.get('reading_id')})")
+                        st.rerun()
+                    else:
+                        st.error("Failed to transmit reading to Cloud Firestore.")
+                except Exception as ex:
+                    st.error(f"Telemetry transmission failed: {str(ex)}")
 
     st.markdown("<div style='margin-bottom: 0.5rem;'></div>", unsafe_allow_html=True)
 

@@ -166,42 +166,46 @@ def _render_my_profile_view_and_update(patient_id, owner_uid):
             btn_cancel = st.form_submit_button("Cancel Editing")
 
             if btn_save:
-                upd_payload = {
-                    "name": e_name.strip(),
-                    "full_name": e_name.strip(),
-                    "age": e_age,
-                    "gender": e_gender,
-                    "blood_group": e_blood.strip(),
-                    "height": e_height,
-                    "weight": e_weight,
-                    "phone_number": e_phone.strip(),
-                    "email": e_email.strip(),
-                    "address": e_address.strip(),
-                    "emergency_name": e_em_name.strip(),
-                    "emergency_phone": e_em_phone.strip(),
-                    "existing_diseases": e_disease.strip(),
-                    "allergies": e_allergies.strip(),
-                    "current_medications": e_meds.strip(),
-                    "doctor_name": e_doctor.strip(),
-                    "hospital_name": e_hospital.strip(),
-                    "medicine_box_id": e_box_id.strip(),
-                    "device_serial_number": e_dev_serial.strip(),
-                }
-                valid, msg = validate_patient_input(upd_payload)
-                if not valid:
-                    st.error(msg)
-                else:
-                    is_dup, dup_msg = check_duplicate_patient(owner_uid, e_phone.strip(), e_email.strip(), e_name.strip(), exclude_patient_id=patient_id)
-                    if is_dup:
-                        st.error(dup_msg)
+                try:
+                    upd_payload = {
+                        "name": e_name.strip(),
+                        "full_name": e_name.strip(),
+                        "age": e_age,
+                        "gender": e_gender,
+                        "blood_group": e_blood.strip(),
+                        "height": e_height,
+                        "weight": e_weight,
+                        "phone_number": e_phone.strip(),
+                        "email": e_email.strip(),
+                        "address": e_address.strip(),
+                        "emergency_name": e_em_name.strip(),
+                        "emergency_phone": e_em_phone.strip(),
+                        "existing_diseases": e_disease.strip(),
+                        "allergies": e_allergies.strip(),
+                        "current_medications": e_meds.strip(),
+                        "doctor_name": e_doctor.strip(),
+                        "hospital_name": e_hospital.strip(),
+                        "medicine_box_id": e_box_id.strip(),
+                        "device_serial_number": e_dev_serial.strip(),
+                    }
+                    valid, msg = validate_patient_input(upd_payload)
+                    if not valid:
+                        st.error(msg)
                     else:
-                        success, res_msg = update_patient_registration(patient_id, upd_payload, owner_uid=owner_uid)
-                        if success:
-                            st.success(res_msg)
-                            st.session_state["editing_patient_profile"] = False
-                            st.rerun()
-                        else:
-                            st.error(res_msg)
+                        with st.spinner("Saving changes to Cloud Firestore..."):
+                            is_dup, dup_msg = check_duplicate_patient(owner_uid, e_phone.strip(), e_email.strip(), e_name.strip(), exclude_patient_id=patient_id)
+                            if is_dup:
+                                st.error(dup_msg)
+                            else:
+                                success, res_msg = update_patient_registration(patient_id, upd_payload, owner_uid=owner_uid)
+                                if success:
+                                    st.success(res_msg)
+                                    st.session_state["editing_patient_profile"] = False
+                                    st.rerun()
+                                else:
+                                    st.error(res_msg)
+                except Exception as ex:
+                    st.error(f"Failed to update profile: {str(ex)}")
 
             if btn_cancel:
                 st.session_state["editing_patient_profile"] = False
@@ -278,49 +282,53 @@ def _render_registration_form(owner_uid):
             cleared = st.form_submit_button("Clear Form")
 
         if submitted:
-            payload = {
-                "name": r_name.strip(),
-                "full_name": r_name.strip(),
-                "age": r_age,
-                "gender": r_gender,
-                "dob": str(r_dob) if r_dob else "",
-                "blood_group": r_blood,
-                "height": r_height,
-                "weight": r_weight,
-                "phone_number": r_phone.strip(),
-                "email": r_email.strip(),
-                "address": r_address.strip(),
-                "emergency_name": r_em_name.strip(),
-                "emergency_phone": r_em_phone.strip(),
-                "existing_diseases": r_disease.strip(),
-                "allergies": r_allergies.strip(),
-                "current_medications": r_meds.strip(),
-                "doctor_name": r_doctor.strip(),
-                "hospital_name": r_hospital.strip(),
-                "medicine_box_id": r_box_id.strip(),
-                "device_serial_number": r_dev_serial.strip(),
-                "owner_uid": owner_uid,
-                "ownerUid": owner_uid,
-            }
+            try:
+                payload = {
+                    "name": r_name.strip(),
+                    "full_name": r_name.strip(),
+                    "age": r_age,
+                    "gender": r_gender,
+                    "dob": str(r_dob) if r_dob else "",
+                    "blood_group": r_blood,
+                    "height": r_height,
+                    "weight": r_weight,
+                    "phone_number": r_phone.strip(),
+                    "email": r_email.strip(),
+                    "address": r_address.strip(),
+                    "emergency_name": r_em_name.strip(),
+                    "emergency_phone": r_em_phone.strip(),
+                    "existing_diseases": r_disease.strip(),
+                    "allergies": r_allergies.strip(),
+                    "current_medications": r_meds.strip(),
+                    "doctor_name": r_doctor.strip(),
+                    "hospital_name": r_hospital.strip(),
+                    "medicine_box_id": r_box_id.strip(),
+                    "device_serial_number": r_dev_serial.strip(),
+                    "owner_uid": owner_uid,
+                    "ownerUid": owner_uid,
+                }
 
-            valid, err_msg = validate_patient_input(payload)
-            if not valid:
-                st.error(err_msg)
-            else:
-                is_dup, dup_msg = check_duplicate_patient(owner_uid, r_phone, r_email, r_name, exclude_patient_id=owner_uid)
-                if is_dup:
-                    st.error(dup_msg)
+                valid, err_msg = validate_patient_input(payload)
+                if not valid:
+                    st.error(err_msg)
                 else:
-                    success, res_msg = save_patient_registration(payload, owner_uid=owner_uid)
-                    if success:
-                        st.session_state["selected_patient_id"] = owner_uid
-                        st.session_state["owner_uid"] = owner_uid
-                        st.session_state["user_uid"] = owner_uid
-                        _clear_form()
-                        st.success(res_msg)
-                        st.switch_page("pages/dashboard.py")
-                    else:
-                        st.error(res_msg)
+                    with st.spinner("Saving patient profile to Cloud Firestore..."):
+                        is_dup, dup_msg = check_duplicate_patient(owner_uid, r_phone, r_email, r_name, exclude_patient_id=owner_uid)
+                        if is_dup:
+                            st.error(dup_msg)
+                        else:
+                            success, res_msg = save_patient_registration(payload, owner_uid=owner_uid)
+                            if success:
+                                st.session_state["selected_patient_id"] = owner_uid
+                                st.session_state["owner_uid"] = owner_uid
+                                st.session_state["user_uid"] = owner_uid
+                                _clear_form()
+                                st.success(res_msg)
+                                st.switch_page("pages/dashboard.py")
+                            else:
+                                st.error(res_msg)
+            except Exception as ex:
+                st.error(f"Failed to register patient profile: {str(ex)}")
 
         if cleared:
             _clear_form()
