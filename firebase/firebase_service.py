@@ -620,45 +620,41 @@ def get_health_metrics(patient_id: Optional[str] = None) -> Dict[str, Any]:
             if cache_data.get(k) is not None:
                 metrics[k] = cache_data.get(k)
 
-    # Defaults if still None
-    if metrics["heart_rate"] is None:
-        metrics["heart_rate"] = 72.0
-    if metrics["spo2"] is None:
-        metrics["spo2"] = 98.0
-    if metrics["temperature"] is None:
-        metrics["temperature"] = 36.8
-    if metrics["blood_pressure"] is None:
-        metrics["blood_pressure"] = "120/80"
     if metrics["battery_level"] is None:
-        metrics["battery_level"] = metrics.get("battery") or 90
+        metrics["battery_level"] = metrics.get("battery")
     if metrics["battery"] is None:
-        metrics["battery"] = metrics.get("battery_level") or 90
-    if metrics["device_status"] is None:
-        metrics["device_status"] = "Connected"
+        metrics["battery"] = metrics.get("battery_level")
 
     score = 100
+    has_vitals = False
     try:
-        hr = float(metrics.get("heart_rate"))
-        if hr > 100 or hr < 60:
-            score -= 15
+        if metrics.get("heart_rate") is not None:
+            hr = float(metrics.get("heart_rate"))
+            has_vitals = True
+            if hr > 100 or hr < 60:
+                score -= 15
     except (TypeError, ValueError):
         pass
 
     try:
-        spo2 = float(metrics.get("spo2"))
-        if spo2 < 95:
-            score -= int((95 - spo2) * 5)
+        if metrics.get("spo2") is not None:
+            spo2 = float(metrics.get("spo2"))
+            has_vitals = True
+            if spo2 < 95:
+                score -= int((95 - spo2) * 5)
     except (TypeError, ValueError):
         pass
 
     try:
-        temp = float(metrics.get("temperature"))
-        if temp > 37.5 or temp < 36.0:
-            score -= 10
+        if metrics.get("temperature") is not None:
+            temp = float(metrics.get("temperature"))
+            has_vitals = True
+            if temp > 37.5 or temp < 36.0:
+                score -= 10
     except (TypeError, ValueError):
         pass
 
-    metrics["health_score"] = max(0, min(100, score))
+    metrics["health_score"] = max(0, min(100, score)) if has_vitals else None
     return metrics
 
 

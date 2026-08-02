@@ -169,6 +169,10 @@ def signup_user(
     st.session_state["owner_uid"] = uid
     st.session_state["selected_patient_id"] = uid
     st.session_state["auth_user"] = user_data
+    try:
+        st.query_params["session_uid"] = uid
+    except Exception:
+        pass
 
     print(f"[FIREBASE AUTH SUCCESS] Successfully registered real Firebase user: {email_clean} (UID: {uid})")
     return True, "Account created successfully! Welcome."
@@ -229,6 +233,10 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
     st.session_state["owner_uid"] = uid
     st.session_state["selected_patient_id"] = uid
     st.session_state["auth_user"] = user_data
+    try:
+        st.query_params["session_uid"] = uid
+    except Exception:
+        pass
 
     print(f"[FIREBASE AUTH SUCCESS] Successfully authenticated real Firebase user: {clean_id} (UID: {uid})")
     return True, "Login successful!"
@@ -238,6 +246,10 @@ def logout_user() -> None:
     """Log out the current user and clear session state completely."""
     for key in list(st.session_state.keys()):
         st.session_state.pop(key, None)
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
     st.rerun()
 
 
@@ -295,6 +307,30 @@ def render_login_page():
 
 def require_auth():
     """Single reusable authentication guard for securing all application pages."""
+    if not st.session_state.get("is_logged_in"):
+        try:
+            param_uid = st.query_params.get("session_uid") or st.query_params.get("uid")
+            if param_uid and str(param_uid).strip():
+                uid = str(param_uid).strip()
+                client = get_firestore_client()
+                user_data = None
+                if client:
+                    try:
+                        doc = client.collection("users").document(uid).get()
+                        if doc.exists:
+                            user_data = doc.to_dict()
+                    except Exception:
+                        pass
+                if not user_data:
+                    user_data = {"uid": uid, "email": ""}
+                st.session_state["is_logged_in"] = True
+                st.session_state["user_uid"] = uid
+                st.session_state["owner_uid"] = uid
+                st.session_state["selected_patient_id"] = uid
+                st.session_state["auth_user"] = user_data
+        except Exception:
+            pass
+
     user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
     is_logged_in = st.session_state.get("is_logged_in", False)
 
