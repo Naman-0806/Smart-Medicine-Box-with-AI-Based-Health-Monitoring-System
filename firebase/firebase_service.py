@@ -29,21 +29,13 @@ def invalidate_firebase_cache():
 
 
 def _resolve_user_uid(uid: Optional[str] = None) -> Optional[str]:
-    """Helper to resolve the current user's Firebase UID consistently. Always prioritizes st.session_state['user_uid']."""
+    """Helper to resolve current user's Firebase UID. Strictly enforces authenticated session UID to prevent cross-user data access."""
     try:
         import streamlit as st
-        session_uid = st.session_state.get("user_uid")
-        if session_uid and str(session_uid).strip():
+        is_logged_in = st.session_state.get("is_logged_in", False)
+        session_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")
+        if is_logged_in and session_uid and str(session_uid).strip():
             return str(session_uid).strip()
-    except Exception:
-        pass
-    if uid and str(uid).strip():
-        return str(uid).strip()
-    try:
-        import streamlit as st
-        resolved = st.session_state.get("owner_uid") or st.session_state.get("selected_patient_id")
-        if resolved and str(resolved).strip():
-            return str(resolved).strip()
     except Exception:
         pass
     return None
