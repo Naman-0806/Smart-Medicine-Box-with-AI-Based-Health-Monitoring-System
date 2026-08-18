@@ -346,7 +346,7 @@ def render_patient():
         st.error("Authentication required. Please log in.")
         return
 
-    # Check if users/{current_uid}/patient/profile exists in Firestore automatically on page open
+    # Check if patients/{current_uid} exists in Firestore automatically on page open
     user_profile = get_patient_by_id(owner_uid, owner_uid=owner_uid, force_refresh=True)
 
     if user_profile:
@@ -357,3 +357,4 @@ def render_patient():
 
 
 render_patient()
+

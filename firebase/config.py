@@ -84,3 +84,26 @@ def get_firebase_web_api_key() -> str:
     )
     return key
 
+
+def get_firebase_project_id() -> str:
+    """Return Firebase Project ID."""
+    proj = (
+        os.getenv("FIREBASE_PROJECT_ID")
+        or os.getenv("PROJECT_ID")
+        or os.getenv("GCP_PROJECT")
+        or ""
+    )
+    if proj:
+        return proj
+
+    # Check if project ID is in service account filename
+    sa_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "")
+    if sa_path and "-firebase-adminsdk" in sa_path:
+        base = os.path.basename(sa_path)
+        proj_part = base.split("-firebase-adminsdk")[0]
+        if proj_part:
+            return proj_part
+
+    return "smart-medicine-box-51870"
+
+

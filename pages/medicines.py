@@ -28,7 +28,7 @@ def render_medicines():
     apply_theme_styles()
 
     st.markdown("# 💊 Medicine Management")
-    st.caption("Manage medication schedules stored in Firebase under `users/{userId}/medicines`.")
+    st.caption("Manage medication schedules stored in Firebase under `patients/{patientId}/medicines`.")
     st.divider()
 
     user_uid = st.session_state.get("user_uid") or st.session_state.get("owner_uid")

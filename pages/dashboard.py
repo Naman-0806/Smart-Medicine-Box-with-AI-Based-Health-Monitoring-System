@@ -149,7 +149,7 @@ def render_dashboard():
 
     # ESP32 Device Testing Expander
     with st.expander("📡 ESP32 Live Device Telemetry", expanded=False):
-        st.write("Transmit live ESP32 vitals directly to Cloud Firestore under `users/{uid}/health/latest`.")
+        st.write("Transmit live ESP32 vitals directly to Cloud Firestore under `patients/{uid}/health/latest`.")
         e_c1, e_c2, e_c3, e_c4 = st.columns(4)
         with e_c1:
             in_hr = st.number_input("Heart Rate (bpm)", min_value=30.0, max_value=220.0, value=75.0, step=1.0)

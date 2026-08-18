@@ -122,7 +122,7 @@ def render_reports():
                 })
             st.dataframe(pd.DataFrame(rpt_rows), use_container_width=True, hide_index=True)
         else:
-            st.info("No saved reports found under `users/{userId}/reports` for your account.")
+            st.info("No saved reports found under `patients/{patientId}/reports` for your account.")
 
     st.divider()
     st.markdown("### 📥 Download & Save Clinical Report")

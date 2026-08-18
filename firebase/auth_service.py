@@ -1,11 +1,17 @@
 import json
 import re
+import time
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 import requests
 import streamlit as st
 
 from firebase.config import get_firebase_web_api_key, get_firestore_client
+from firebase.firestore_rest import (
+    firestore_get_doc,
+    firestore_set_doc,
+    get_jwt_project_id,
+)
 from src.ui import apply_theme_styles
 
 
@@ -151,10 +157,16 @@ def signup_user(
         return False, user_facing_msg
 
     uid = res_data.get("localId")
+    id_token = res_data.get("idToken")
+    refresh_token = res_data.get("refreshToken")
+    expires_in = int(res_data.get("expiresIn") or 3600)
+
     if not uid:
         err_msg = "Failed to retrieve user ID from Firebase Authentication."
         print(f"[FIREBASE AUTH ERROR] Signup failed for {email_clean}: {err_msg}")
         return False, err_msg
+
+    project_id = get_jwt_project_id(id_token)
 
     now_iso = datetime.utcnow().isoformat()
     user_data = {
@@ -165,13 +177,23 @@ def signup_user(
         "created_at": now_iso,
     }
 
-    # Store user profile document in Firestore at /users/{uid} using Firebase Admin SDK
+    # Store tokens in session state first so REST requests can authenticate
+    st.session_state["id_token"] = id_token
+    st.session_state["refresh_token"] = refresh_token
+    st.session_state["token_expires_at"] = time.time() + expires_in
+    if project_id:
+        st.session_state["project_id"] = project_id
+
+    # Store user profile document in Firestore at /users/{uid} using REST or Admin SDK
     client = get_firestore_client()
     if client:
         try:
             client.collection("users").document(uid).set(user_data, merge=True)
         except Exception as e:
-            print(f"[WARNING] Failed to save user profile to Firestore: {e}")
+            print(f"[WARNING] Admin SDK write failed, attempting REST: {e}")
+            firestore_set_doc(f"users/{uid}", user_data, id_token=id_token, project_id=project_id)
+    else:
+        firestore_set_doc(f"users/{uid}", user_data, id_token=id_token, project_id=project_id)
 
     # Store user session state
     st.session_state["is_logged_in"] = True
@@ -213,21 +235,39 @@ def login_user(identifier: str, password: str) -> Tuple[bool, str]:
         return False, user_facing_msg
 
     uid = res_data.get("localId")
+    id_token = res_data.get("idToken")
+    refresh_token = res_data.get("refreshToken")
+    expires_in = int(res_data.get("expiresIn") or 3600)
+
     if not uid:
         err_msg = "User account not found. Please check your credentials or sign up."
         print(f"[FIREBASE AUTH ERROR] Login failed for {clean_id}: {err_msg}")
         return False, err_msg
 
+    project_id = get_jwt_project_id(id_token)
+
+    # Store tokens in session state
+    st.session_state["id_token"] = id_token
+    st.session_state["refresh_token"] = refresh_token
+    st.session_state["token_expires_at"] = time.time() + expires_in
+    if project_id:
+        st.session_state["project_id"] = project_id
+
     # After successful authentication, load user profile from Firestore /users/{uid}
-    client = get_firestore_client()
     user_data = None
+    client = get_firestore_client()
     if client:
         try:
             doc = client.collection("users").document(uid).get()
             if doc.exists:
                 user_data = doc.to_dict()
         except Exception as e:
-            print(f"[WARNING] Failed to fetch user profile from Firestore: {e}")
+            print(f"[WARNING] Failed to fetch user profile via Admin SDK: {e}")
+
+    if not user_data:
+        ok, rest_data, _ = firestore_get_doc(f"users/{uid}", id_token=id_token, project_id=project_id)
+        if ok and rest_data:
+            user_data = rest_data
 
     if not user_data:
         user_data = {
