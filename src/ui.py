@@ -20,10 +20,10 @@ def apply_theme_styles():
         text = "#FFFFFF"
         border = "#334155"
     else:
-        bg = "#F8FAFC"
-        surface = "#FFFFFF"
-        text = "#0F172A"
-        border = "#CBD5E1"
+        bg = "#e6ffee"
+        surface = "#ffc2b3"
+        text = "#1E293B"
+        border = "#D1D5DB"
 
     st.markdown(
         f"""
